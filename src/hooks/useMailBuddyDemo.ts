@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { loadSampleEmails } from '@/services/mailData'
-import type { ActionItem, Email } from '@/types/mail'
+import type { ActionItem, ActionItemEdit, Email } from '@/types/mail'
 import {
   extractActionItems,
   generateDashboardStats,
@@ -51,22 +51,43 @@ export function useMailBuddyDemo() {
     )
   }
 
-  function editAction(actionId: string, newTitle: string): void {
-    const trimmedTitle = newTitle.trim()
+  function editAction(actionId: string, updates: ActionItemEdit): void {
+    const trimmedTitle = updates.title.trim()
+    const trimmedDueDate = updates.dueDate?.trim()
 
     if (!trimmedTitle) {
       return
     }
 
     setActions((currentActions) =>
-      currentActions.map((action) =>
-        action.id === actionId ? { ...action, title: trimmedTitle } : action,
-      ),
+      currentActions.map((action) => {
+        if (action.id !== actionId) {
+          return action
+        }
+
+        return {
+          ...action,
+          dueDate: trimmedDueDate || undefined,
+          dueDateSource: getEditedDueDateSource(action, trimmedDueDate),
+          priority: updates.priority,
+          title: trimmedTitle,
+        }
+      }),
     )
   }
 
-  function selectSourceEmail(actionId: string): void {
-    setSelectedActionId(actionId)
+  function toggleSourceEmail(actionId: string): void {
+    setSelectedActionId((currentId) =>
+      currentId === actionId ? null : actionId,
+    )
+  }
+
+  function restoreAction(actionId: string): void {
+    setActions((currentActions) =>
+      currentActions.map((action) =>
+        action.id === actionId ? { ...action, status: 'suggested' } : action,
+      ),
+    )
   }
 
   function resetDemo(): void {
@@ -80,10 +101,22 @@ export function useMailBuddyDemo() {
     editAction,
     markActionDone,
     resetDemo,
-    selectSourceEmail,
+    restoreAction,
     selectedAction,
     selectedActionId,
     selectedEmail,
     stats,
+    toggleSourceEmail,
   }
+}
+
+function getEditedDueDateSource(
+  action: ActionItem,
+  nextDueDate: string | undefined,
+) {
+  if (!nextDueDate) {
+    return undefined
+  }
+
+  return nextDueDate === action.dueDate ? action.dueDateSource : 'user'
 }

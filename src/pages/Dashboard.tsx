@@ -10,11 +10,12 @@ export function Dashboard() {
     editAction,
     markActionDone,
     resetDemo,
-    selectSourceEmail,
+    restoreAction,
     selectedAction,
     selectedActionId,
     selectedEmail,
     stats,
+    toggleSourceEmail,
   } = useMailBuddyDemo()
 
   return (
@@ -54,13 +55,14 @@ export function Dashboard() {
 
       <SummaryStrip stats={stats} />
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.75fr)]">
+      <section className="grid gap-6 xl:grid-cols-2">
         <SuggestedTodoList
           actions={actions}
           onDismiss={dismissAction}
           onEdit={editAction}
           onMarkDone={markActionDone}
-          onViewSource={selectSourceEmail}
+          onRestore={restoreAction}
+          onToggleSource={toggleSourceEmail}
           selectedActionId={selectedActionId}
         />
         <SourceEmailPreview action={selectedAction} email={selectedEmail} />

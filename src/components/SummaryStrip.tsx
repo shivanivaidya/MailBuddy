@@ -29,17 +29,17 @@ export function SummaryStrip({ stats }: SummaryStripProps) {
   ]
 
   return (
-    <section className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-4">
+    <section className="grid gap-2 rounded-lg bg-white/70 p-2 ring-1 ring-slate-200 md:grid-cols-4">
       {summaryItems.map((item) => (
         <article
-          className="rounded-md border border-slate-100 bg-slate-50 px-4 py-4"
+          className="rounded-md bg-slate-50/70 px-4 py-3"
           key={item.label}
         >
-          <p className="text-sm font-medium text-slate-500">{item.label}</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+          <p className="text-xs font-medium text-slate-500">{item.label}</p>
+          <p className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
             {item.value}
           </p>
-          <p className="mt-1 text-xs font-medium text-cyan-700">
+          <p className="mt-0.5 text-xs font-medium text-slate-500">
             {item.detail}
           </p>
         </article>

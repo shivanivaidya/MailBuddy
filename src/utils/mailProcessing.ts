@@ -56,13 +56,16 @@ export function extractActionItems(emails: Email[]): ActionItem[] {
       return []
     }
 
+    const dueDate = extractDueDate(email)
+
     return [
       {
         id: `action_${email.id}`,
         emailId: email.id,
         title: createTaskTitle(email),
         priority: prioritizeActionItem(email),
-        dueDate: extractDueDate(email),
+        dueDate,
+        dueDateSource: dueDate ? 'email' : undefined,
         status: 'suggested',
         sourceSender: email.sender,
         sourceSubject: email.subject,

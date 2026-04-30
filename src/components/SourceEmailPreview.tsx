@@ -8,7 +8,7 @@ type SourceEmailPreviewProps = {
 export function SourceEmailPreview({ action, email }: SourceEmailPreviewProps) {
   if (!action || !email) {
     return (
-      <aside className="rounded-lg border border-dashed border-slate-300 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+      <aside className="rounded-lg border border-dashed border-slate-200 bg-white/80 shadow-sm xl:sticky xl:top-6 xl:self-start">
         <div className="border-b border-slate-200 px-5 py-4">
           <h3 className="text-base font-semibold text-slate-950">
             Source email preview
@@ -30,7 +30,7 @@ export function SourceEmailPreview({ action, email }: SourceEmailPreviewProps) {
   }
 
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+    <aside className="rounded-lg border border-slate-200 bg-white/90 shadow-sm xl:sticky xl:top-6 xl:self-start">
       <div className="border-b border-slate-200 px-5 py-4">
         <h3 className="text-base font-semibold text-slate-950">
           Source email preview

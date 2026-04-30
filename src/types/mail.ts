@@ -14,11 +14,16 @@ export type ActionItem = {
   title: string
   priority: 'high' | 'medium' | 'low'
   dueDate?: string
+  dueDateSource?: 'email' | 'user'
   status: 'suggested' | 'completed' | 'dismissed'
   sourceSender: string
   sourceSubject: string
   sourceSnippet: string
   reason: string
+}
+
+export type ActionItemEdit = Pick<ActionItem, 'priority' | 'title'> & {
+  dueDate?: string
 }
 
 export type DashboardStats = {
