@@ -106,7 +106,7 @@ export function SuggestedTodoList({
     <section className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
       <div className="flex flex-col gap-4 bg-slate-950 px-5 py-5 text-white sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-xl font-semibold">Suggested to-do list</h3>
+          <h3 className="text-xl font-semibold">Quick actions</h3>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
             Suggested by MailBuddy from your sample emails. Review before
             acting.

@@ -6,6 +6,7 @@ export type Email = {
   date: string
   direction: 'inbound' | 'sent'
   labels?: string[]
+  recipients?: string[]
 }
 
 export type ActionItem = {
@@ -31,4 +32,23 @@ export type DashboardStats = {
   tasksFound: number
   highPriorityTasks: number
   completedTasks: number
+}
+
+export type EmailThread = {
+  id: string
+  subject: string
+  participants: string[]
+  priority: 'high' | 'medium' | 'low'
+  dueDate?: string
+  dueDateSource?: 'email' | 'user'
+  status: 'suggested' | 'reviewed'
+  shortSummary: string
+  detailedSummaryBullets: string[]
+  latestEmail: Email
+  emails: Email[]
+  needsReply: boolean
+}
+
+export type EmailThreadEdit = Pick<EmailThread, 'priority'> & {
+  dueDate?: string
 }

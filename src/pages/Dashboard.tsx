@@ -1,22 +1,40 @@
+import { useState } from 'react'
 import { SourceEmailPreview } from '@/components/SourceEmailPreview'
 import { SuggestedTodoList } from '@/components/SuggestedTodoList'
 import { SummaryStrip } from '@/components/SummaryStrip'
+import { ThreadsSection } from '@/components/ThreadsSection'
 import { useMailBuddyDemo } from '@/hooks/useMailBuddyDemo'
 
+type WorkspaceTab = 'tasks' | 'threads'
+
 export function Dashboard() {
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('tasks')
   const {
     actions,
     dismissAction,
     editAction,
+    editThread,
+    markConversationReviewed,
     markActionDone,
     resetDemo,
     restoreAction,
+    restoreThread,
     selectedAction,
     selectedActionId,
     selectedEmail,
+    selectedThread,
+    selectedThreadId,
     stats,
+    threads,
     toggleSourceEmail,
+    toggleThread,
   } = useMailBuddyDemo()
+  const suggestedTaskCount = actions.filter(
+    (action) => action.status === 'suggested',
+  ).length
+  const activeThreadCount = threads.filter(
+    (thread) => thread.status === 'suggested',
+  ).length
 
   return (
     <div className="space-y-6">
@@ -29,8 +47,8 @@ export function Dashboard() {
             Suggested next steps from your inbox
           </h2>
           <p className="mt-3 text-base leading-7 text-slate-600">
-            A clean Phase 1 shell for reviewing extracted to-do items alongside
-            the email context they came from.
+            Review fast inbox actions or switch into conversation context when
+            a thread needs more attention.
           </p>
         </div>
 
@@ -55,18 +73,82 @@ export function Dashboard() {
 
       <SummaryStrip stats={stats} />
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <SuggestedTodoList
-          actions={actions}
-          onDismiss={dismissAction}
-          onEdit={editAction}
-          onMarkDone={markActionDone}
-          onRestore={restoreAction}
-          onToggleSource={toggleSourceEmail}
-          selectedActionId={selectedActionId}
+      <div className="inline-flex rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
+        <TabButton
+          active={activeTab === 'tasks'}
+          count={suggestedTaskCount}
+          label="Quick actions"
+          onClick={() => setActiveTab('tasks')}
         />
-        <SourceEmailPreview action={selectedAction} email={selectedEmail} />
+        <TabButton
+          active={activeTab === 'threads'}
+          count={activeThreadCount}
+          label="Conversations"
+          onClick={() => setActiveTab('threads')}
+        />
+      </div>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        {activeTab === 'tasks' ? (
+          <SuggestedTodoList
+            actions={actions}
+            onDismiss={dismissAction}
+            onEdit={editAction}
+            onMarkDone={markActionDone}
+            onRestore={restoreAction}
+            onToggleSource={toggleSourceEmail}
+            selectedActionId={selectedActionId}
+          />
+        ) : (
+          <ThreadsSection
+            onEditThread={editThread}
+            onMarkReviewed={markConversationReviewed}
+            onRestoreThread={restoreThread}
+            onToggleThread={toggleThread}
+            selectedThreadId={selectedThreadId}
+            threads={threads}
+          />
+        )}
+        <SourceEmailPreview
+          action={activeTab === 'tasks' ? selectedAction : null}
+          email={activeTab === 'tasks' ? selectedEmail : undefined}
+          mode={activeTab === 'threads' ? 'thread' : 'source'}
+          thread={activeTab === 'threads' ? selectedThread : null}
+        />
       </section>
     </div>
+  )
+}
+
+function TabButton({
+  active,
+  count,
+  label,
+  onClick,
+}: {
+  active: boolean
+  count: number
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+        active
+          ? 'bg-slate-950 text-white shadow-sm'
+          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+      <span
+        className={`ml-2 rounded px-1.5 py-0.5 text-xs ${
+          active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'
+        }`}
+      >
+        {count}
+      </span>
+    </button>
   )
 }
