@@ -51,7 +51,7 @@ const actionKeywords = [
 ]
 
 export function extractActionItems(emails: Email[]): ActionItem[] {
-  return emails.flatMap((email) => {
+  const directActions = emails.flatMap<ActionItem>((email) => {
     if (!shouldCreateActionItem(email)) {
       return []
     }
@@ -74,6 +74,13 @@ export function extractActionItems(emails: Email[]): ActionItem[] {
       },
     ]
   })
+  const actionEmailIds = new Set(directActions.map((action) => action.emailId))
+  const followUpActions = extractUnansweredSentFollowUps(
+    emails,
+    actionEmailIds,
+  )
+
+  return [...directActions, ...followUpActions]
 }
 
 export function prioritizeActionItem(email: Email): Priority {
@@ -110,6 +117,10 @@ function shouldCreateActionItem(email: Email) {
 
   if (includesAny(text, noTaskKeywords)) {
     return false
+  }
+
+  if (isSentByUser(email)) {
+    return text.includes('i will follow up')
   }
 
   return includesAny(text, actionKeywords)
@@ -175,6 +186,101 @@ function createReason(email: Email) {
   return 'MailBuddy found an optional action that may be useful to review.'
 }
 
+function extractUnansweredSentFollowUps(
+  emails: Email[],
+  actionEmailIds: Set<string>,
+) {
+  const latestEmailTime = getLatestEmailTime(emails)
+
+  return emails.flatMap((email) => {
+    if (
+      actionEmailIds.has(email.id) ||
+      !isSentByUser(email) ||
+      !isOldEnoughForFollowUp(email, latestEmailTime) ||
+      !isMeaningfulSentRequest(email) ||
+      hasLaterInboundReply(email, emails)
+    ) {
+      return []
+    }
+
+    return [
+      {
+        id: `action_${email.id}_follow_up`,
+        emailId: email.id,
+        title: createSentFollowUpTitle(email),
+        priority: 'medium',
+        status: 'suggested',
+        sourceSender: email.sender,
+        sourceSubject: email.subject,
+        sourceSnippet: createSourceSnippet(email.body),
+        reason: 'No response received yet.',
+      } satisfies ActionItem,
+    ]
+  })
+}
+
+function isSentByUser(email: Email) {
+  return email.direction === 'sent' && email.sender.toLowerCase() === 'me'
+}
+
+function isOldEnoughForFollowUp(email: Email, latestEmailTime: number) {
+  const twoDaysInMs = 2 * 24 * 60 * 60 * 1000
+  return latestEmailTime - new Date(email.date).getTime() > twoDaysInMs
+}
+
+function isMeaningfulSentRequest(email: Email) {
+  const text = getSearchText(email)
+  const requestKeywords = [
+    'can you',
+    'could you',
+    'please send',
+    'please confirm',
+    'confirm whether',
+    'send the',
+    'need it',
+    'need your',
+    'waiting on',
+    '?',
+  ]
+
+  if (includesAny(text, noTaskKeywords) || text.includes('no action needed')) {
+    return false
+  }
+
+  return includesAny(text, requestKeywords)
+}
+
+function hasLaterInboundReply(sentEmail: Email, emails: Email[]) {
+  const sentEmailTime = new Date(sentEmail.date).getTime()
+  const sentThreadKey = getSubjectGroup(sentEmail.subject)
+
+  return emails.some(
+    (email) =>
+      email.direction === 'inbound' &&
+      new Date(email.date).getTime() > sentEmailTime &&
+      getSubjectGroup(email.subject) === sentThreadKey,
+  )
+}
+
+function createSentFollowUpTitle(email: Email) {
+  const recipientName = formatRecipientName(email.recipients?.[0])
+  const topic = cleanSubject(email.subject)
+
+  if (recipientName) {
+    return `Follow up with ${recipientName} about ${topic}`
+  }
+
+  return `Follow up on ${topic}`
+}
+
+function formatRecipientName(recipient?: string) {
+  return recipient?.replace(/\s*<[^>]+>\s*$/, '').trim()
+}
+
+function getLatestEmailTime(emails: Email[]) {
+  return Math.max(...emails.map((email) => new Date(email.date).getTime()))
+}
+
 function createSourceSnippet(body: string) {
   const normalizedBody = body.replace(/\s+/g, ' ').trim()
 
@@ -211,6 +317,13 @@ function extractDueDate(email: Email) {
 
 function cleanSubject(subject: string) {
   return subject.replace(/^(re|fw|fwd):\s*/i, '').trim()
+}
+
+function getSubjectGroup(subject: string) {
+  return cleanSubject(subject)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 
 function includesAny(text: string, keywords: string[]) {

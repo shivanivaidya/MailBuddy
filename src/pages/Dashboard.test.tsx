@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { Dashboard } from '@/pages/Dashboard'
 
 function openDateFilter() {
-  fireEvent.click(screen.getByRole('button', { name: /Apr 27.*28 emails/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Apr 27.*33 emails/i }))
   return screen.getAllByLabelText('Date range value') as HTMLInputElement[]
 }
 
@@ -32,7 +32,11 @@ describe('Dashboard integration', () => {
     render(<Dashboard />)
 
     expect(screen.getByText('Pay upcoming bill')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Quick actions\s*9/i })).toBeInTheDocument()
+    expect(
+      screen.getByText('Follow up with Dana Repairs about Kitchen repair estimate'),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('No response received yet.').length).toBe(2)
+    expect(screen.getByRole('button', { name: /Quick actions\s*11/i })).toBeInTheDocument()
 
     const billCard = closestArticle('Pay upcoming bill')
     fireEvent.click(within(billCard).getByRole('button', { name: 'Edit' }))
@@ -48,7 +52,7 @@ describe('Dashboard integration', () => {
         name: 'Mark done',
       }),
     )
-    expect(screen.getByRole('button', { name: /Quick actions\s*8/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Quick actions\s*10/i })).toBeInTheDocument()
 
     fireEvent.click(
       within(closestArticle('Sign and return permission slip')).getByRole(
@@ -58,7 +62,7 @@ describe('Dashboard integration', () => {
         },
       ),
     )
-    expect(screen.getByRole('button', { name: /Quick actions\s*7/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Quick actions\s*9/i })).toBeInTheDocument()
   })
 
   it('shows empty states in every tab when the global date range has no data', () => {

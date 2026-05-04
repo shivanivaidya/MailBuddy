@@ -356,6 +356,11 @@ function ActionItemCard({
                   {action.status}
                 </span>
               ) : null}
+              {action.reason === 'No response received yet.' ? (
+                <span className="rounded-md border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700">
+                  {action.reason}
+                </span>
+              ) : null}
             </div>
 
             {showEmailMeta && !isEditing ? (

@@ -13,7 +13,7 @@ describe('useMailBuddyDemo state transitions', () => {
       })
     })
 
-    expect(result.current.filteredEmails).toHaveLength(11)
+    expect(result.current.filteredEmails).toHaveLength(12)
     expect(result.current.filteredActions).toHaveLength(6)
     expect(result.current.filteredActions.map((action) => action.emailId)).toContain(
       'email_bill_due',
