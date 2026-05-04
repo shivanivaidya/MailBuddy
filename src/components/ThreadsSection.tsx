@@ -50,7 +50,7 @@ export function ThreadsSection({
           })
         ) : (
           <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
-            No active conversations.
+            No data found for this date range.
           </div>
         )}
         <ThreadArchiveSection

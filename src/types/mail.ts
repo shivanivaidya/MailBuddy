@@ -52,3 +52,68 @@ export type EmailThread = {
 export type EmailThreadEdit = Pick<EmailThread, 'priority'> & {
   dueDate?: string
 }
+
+export type OrderStatus =
+  | 'delivered'
+  | 'out_for_delivery'
+  | 'shipped'
+  | 'refunded'
+  | 'partially_refunded'
+  | 'confirmed'
+  | 'updated'
+
+export type DeliveryStatus =
+  | 'delivered'
+  | 'out_for_delivery'
+  | 'shipped'
+  | 'delayed'
+
+export type RefundedItem = {
+  amount: number
+  name: string
+}
+
+export type ReplacedItem = {
+  originalItem: string
+  priceDifference?: number
+  replacementItem: string
+}
+
+export type OrderItem = {
+  name: string
+  price: number
+}
+
+export type OrderUpdate = {
+  id: string
+  merchantName: string
+  orderNumber: string
+  orderDate: string
+  status: OrderStatus
+  deliveryStatus?: DeliveryStatus
+  expectedDeliveryTime?: string
+  deliveredTime?: string
+  trackingNumber?: string
+  trackingDetails?: string
+  items?: OrderItem[]
+  replacedItems?: ReplacedItem[]
+  refundedItems?: RefundedItem[]
+  orderTotal?: number
+  refundTotal?: number
+  finalChargedAmount?: number
+  relatedEmailIds: string[]
+}
+
+export type MerchantSpendSummary = {
+  merchantName: string
+  orderCount: number
+  refundTotal: number
+  totalSpend: number
+  netSpend: number
+  monthlySpend: Array<{
+    month: string
+    refundTotal: number
+    totalSpend: number
+    netSpend: number
+  }>
+}

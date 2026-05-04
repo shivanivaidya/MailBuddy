@@ -160,10 +160,10 @@ export function SuggestedTodoList({
         ) : (
           <div className="rounded-lg border border-dashed border-cyan-300 bg-cyan-50 p-8 text-center">
             <p className="font-semibold text-slate-950">
-              No suggested tasks remaining
+              No data found for this date range
             </p>
             <p className="mt-1 text-sm text-slate-600">
-              Refresh the demo to restore the original sample task list.
+              Adjust the global date range to broaden results.
             </p>
           </div>
         )}

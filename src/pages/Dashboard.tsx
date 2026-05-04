@@ -1,40 +1,54 @@
 import { useState } from 'react'
+import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SourceEmailPreview } from '@/components/SourceEmailPreview'
 import { SuggestedTodoList } from '@/components/SuggestedTodoList'
 import { SummaryStrip } from '@/components/SummaryStrip'
 import { ThreadsSection } from '@/components/ThreadsSection'
+import { UpdatesSection } from '@/components/UpdatesSection'
 import { useMailBuddyDemo } from '@/hooks/useMailBuddyDemo'
 
-type WorkspaceTab = 'tasks' | 'threads'
+type WorkspaceTab = 'tasks' | 'threads' | 'updates'
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('tasks')
   const {
-    actions,
+    availableDateRange,
+    dateRange,
     dismissAction,
     editAction,
     editThread,
+    filteredActions,
+    filteredEmails,
+    filteredThreads,
     markConversationReviewed,
     markActionDone,
     resetDemo,
+    merchantSpend,
+    orderUpdates,
     restoreAction,
     restoreThread,
     selectedAction,
     selectedActionId,
     selectedEmail,
+    selectedOrder,
+    selectedOrderEmails,
+    selectedOrderId,
     selectedThread,
     selectedThreadId,
     stats,
-    threads,
+    toggleOrderUpdate,
     toggleSourceEmail,
     toggleThread,
+    updateDateRange,
   } = useMailBuddyDemo()
-  const suggestedTaskCount = actions.filter(
+  const suggestedTaskCount = filteredActions.filter(
     (action) => action.status === 'suggested',
   ).length
-  const activeThreadCount = threads.filter(
+  const activeThreadCount = filteredThreads.filter(
     (thread) => thread.status === 'suggested',
   ).length
+  const updateCount = orderUpdates.length
+  const dateFilterMeta = `${filteredEmails.length} emails`
 
   return (
     <div className="space-y-6">
@@ -73,7 +87,14 @@ export function Dashboard() {
 
       <SummaryStrip stats={stats} />
 
-      <div className="inline-flex rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
+      <DateRangeFilter
+        availableDateRange={availableDateRange}
+        dateRange={dateRange}
+        meta={dateFilterMeta}
+        onChange={updateDateRange}
+      />
+
+      <div className="inline-flex w-fit rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
         <TabButton
           active={activeTab === 'tasks'}
           count={suggestedTaskCount}
@@ -86,12 +107,18 @@ export function Dashboard() {
           label="Conversations"
           onClick={() => setActiveTab('threads')}
         />
+        <TabButton
+          active={activeTab === 'updates'}
+          count={updateCount}
+          label="Updates"
+          onClick={() => setActiveTab('updates')}
+        />
       </div>
 
       <section className="grid gap-6 xl:grid-cols-2">
         {activeTab === 'tasks' ? (
           <SuggestedTodoList
-            actions={actions}
+            actions={filteredActions}
             onDismiss={dismissAction}
             onEdit={editAction}
             onMarkDone={markActionDone}
@@ -99,20 +126,35 @@ export function Dashboard() {
             onToggleSource={toggleSourceEmail}
             selectedActionId={selectedActionId}
           />
-        ) : (
+        ) : activeTab === 'threads' ? (
           <ThreadsSection
             onEditThread={editThread}
             onMarkReviewed={markConversationReviewed}
             onRestoreThread={restoreThread}
             onToggleThread={toggleThread}
             selectedThreadId={selectedThreadId}
-            threads={threads}
+            threads={filteredThreads}
+          />
+        ) : (
+          <UpdatesSection
+            merchantSpend={merchantSpend}
+            onToggleOrder={toggleOrderUpdate}
+            orderUpdates={orderUpdates}
+            selectedOrderId={selectedOrderId}
           />
         )}
         <SourceEmailPreview
           action={activeTab === 'tasks' ? selectedAction : null}
           email={activeTab === 'tasks' ? selectedEmail : undefined}
-          mode={activeTab === 'threads' ? 'thread' : 'source'}
+          mode={
+            activeTab === 'threads'
+              ? 'thread'
+              : activeTab === 'updates'
+                ? 'updates'
+                : 'source'
+          }
+          order={activeTab === 'updates' ? selectedOrder : null}
+          orderEmails={activeTab === 'updates' ? selectedOrderEmails : []}
           thread={activeTab === 'threads' ? selectedThread : null}
         />
       </section>
