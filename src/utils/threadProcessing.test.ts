@@ -12,6 +12,9 @@ describe('groupEmailsIntoThreads', () => {
         'Portland trip planning',
         'Q2 launch scope',
         'Team retreat agenda',
+        'Friday dinner reservation',
+        'Budget review notes',
+        'Neighborhood outing',
       ]),
     )
     expect(subjects).not.toContain('Payment due for your April utility bill')
@@ -35,5 +38,26 @@ describe('groupEmailsIntoThreads', () => {
       expect.arrayContaining(['Alex Kim', 'Me', 'Priya Shah']),
     )
     expect(retreatThread?.participants).toHaveLength(10)
+  })
+
+  it('creates useful generic summaries for new conversation threads', () => {
+    const threads = groupEmailsIntoThreads(sampleEmails)
+    const outingThread = threads.find(
+      (thread) => thread.subject === 'Neighborhood outing',
+    )
+
+    expect(outingThread?.shortSummary).toBe(
+      'Avery Kim and Nina Rao proposed Saturday morning works.',
+    )
+    expect(outingThread?.detailedSummaryBullets).toEqual(
+      expect.arrayContaining([
+        'Avery Kim and Nina Rao are discussing neighborhood outing.',
+        'Current proposal: The park pavilion is available on Saturday morning, and I can bring the sign-up sheet.',
+        'Open action: Someone needs to handle the supplies list.',
+      ]),
+    )
+    expect(outingThread?.detailedSummaryBullets).not.toContain(
+      'Latest message came from the sender.',
+    )
   })
 })

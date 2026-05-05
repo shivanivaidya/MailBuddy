@@ -79,6 +79,10 @@ export function useMailBuddyDemo() {
     [filteredEmailIds, threads],
   )
   const allOrderUpdates = useMemo(() => extractOrderUpdates(emails), [emails])
+  const allMerchantSpend = useMemo(
+    () => generateMerchantSpendSummaries(allOrderUpdates),
+    [allOrderUpdates],
+  )
   const filteredOrderEmails = useMemo(
     () => filterOrderEmailsByDateRange(filteredEmails, allOrderUpdates),
     [allOrderUpdates, filteredEmails],
@@ -245,11 +249,14 @@ export function useMailBuddyDemo() {
 
   return {
     actions,
+    allMerchantSpend,
+    allOrderUpdates,
     availableDateRange,
     dateRange,
     dismissAction,
     editAction,
     editThread,
+    emails,
     filteredActions,
     filteredEmails,
     filteredThreads,

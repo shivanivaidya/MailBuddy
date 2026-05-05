@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { AssistantPanel } from '@/components/AssistantPanel'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SourceEmailPreview } from '@/components/SourceEmailPreview'
 import { SuggestedTodoList } from '@/components/SuggestedTodoList'
@@ -6,17 +7,36 @@ import { SummaryStrip } from '@/components/SummaryStrip'
 import { ThreadsSection } from '@/components/ThreadsSection'
 import { UpdatesSection } from '@/components/UpdatesSection'
 import { useMailBuddyDemo } from '@/hooks/useMailBuddyDemo'
+import type { AssistantAnswer } from '@/types/mail'
+import {
+  answerAssistantTurn,
+  type AssistantMemory,
+} from '@/utils/assistantProcessing'
+import {
+  answerAssistantWithToolPlanning,
+  finalizeAssistantToolResults,
+} from '@/utils/assistantToolAgent'
 
 type WorkspaceTab = 'tasks' | 'threads' | 'updates'
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('tasks')
+  const [assistantAnswer, setAssistantAnswer] =
+    useState<AssistantAnswer | null>(null)
+  const [assistantMemory, setAssistantMemory] = useState<AssistantMemory>({})
+  const [isFinalizingAnswer, setIsFinalizingAnswer] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const assistantRequestId = useRef(0)
   const {
+    actions,
     availableDateRange,
     dateRange,
+    allMerchantSpend,
+    allOrderUpdates,
     dismissAction,
     editAction,
     editThread,
+    emails,
     filteredActions,
     filteredEmails,
     filteredThreads,
@@ -36,6 +56,7 @@ export function Dashboard() {
     selectedThread,
     selectedThreadId,
     stats,
+    threads,
     toggleOrderUpdate,
     toggleSourceEmail,
     toggleThread,
@@ -49,6 +70,64 @@ export function Dashboard() {
   ).length
   const updateCount = orderUpdates.length
   const dateFilterMeta = `${filteredEmails.length} emails`
+
+  function askAssistant(query: string) {
+    const requestId = assistantRequestId.current + 1
+    assistantRequestId.current = requestId
+    const assistantDateRange = getAssistantDateRange(query)
+    const assistantContext = {
+      actions,
+      dateRange: assistantDateRange,
+      emails,
+      merchantSpend: allMerchantSpend,
+      orders: allOrderUpdates,
+      threads,
+    }
+    const fallback = answerAssistantTurn(
+      query,
+      assistantContext,
+      assistantMemory,
+    )
+
+    if (!query.trim()) {
+      setAssistantAnswer(fallback.answer)
+      setAssistantMemory(fallback.memory)
+      setIsFinalizingAnswer(false)
+      return
+    }
+
+    setAssistantAnswer(null)
+    setIsFinalizingAnswer(true)
+    void answerAssistantWithToolPlanning(
+      query,
+      assistantContext,
+      assistantMemory,
+    )
+      .then((plannedResult) => {
+        if (assistantRequestId.current !== requestId) {
+          return fallback.answer
+        }
+
+        setAssistantAnswer(plannedResult.answer)
+        setAssistantMemory(plannedResult.memory)
+
+        return finalizeAssistantToolResults(
+          query,
+          plannedResult.answer,
+          plannedResult.toolResults,
+        )
+      })
+      .then((finalAnswer) => {
+        if (assistantRequestId.current === requestId) {
+          setAssistantAnswer(finalAnswer)
+        }
+      })
+      .finally(() => {
+        if (assistantRequestId.current === requestId) {
+          setIsFinalizingAnswer(false)
+        }
+      })
+  }
 
   return (
     <div className="space-y-6">
@@ -92,6 +171,14 @@ export function Dashboard() {
         dateRange={dateRange}
         meta={dateFilterMeta}
         onChange={updateDateRange}
+      />
+
+      <AssistantPanel
+        answer={assistantAnswer}
+        isFinalizingAnswer={isFinalizingAnswer}
+        isListening={isListening}
+        onAsk={askAssistant}
+        onListeningChange={setIsListening}
       />
 
       <div className="inline-flex w-fit rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
@@ -160,6 +247,57 @@ export function Dashboard() {
       </section>
     </div>
   )
+}
+
+function getAssistantDateRange(query: string) {
+  const normalizedQuery = query.toLowerCase()
+  const today = new Date()
+
+  if (normalizedQuery.includes('this month')) {
+    const year = today.getFullYear()
+    const monthIndex = today.getMonth()
+    const month = String(monthIndex + 1).padStart(2, '0')
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+
+    return {
+      endDate: `${year}-${month}-${String(lastDay).padStart(2, '0')}`,
+      startDate: `${year}-${month}-01`,
+    }
+  }
+
+  if (normalizedQuery.includes('last month')) {
+    const year = today.getFullYear()
+    const monthIndex = today.getMonth() - 1
+    const lastMonth = new Date(year, monthIndex, 1)
+    const lastMonthYear = lastMonth.getFullYear()
+    const lastMonthIndex = lastMonth.getMonth()
+    const month = String(lastMonthIndex + 1).padStart(2, '0')
+    const lastDay = new Date(lastMonthYear, lastMonthIndex + 1, 0).getDate()
+
+    return {
+      endDate: `${lastMonthYear}-${month}-${String(lastDay).padStart(2, '0')}`,
+      startDate: `${lastMonthYear}-${month}-01`,
+    }
+  }
+
+  if (normalizedQuery.includes('today')) {
+    const todayValue = toDateValue(today)
+
+    return {
+      endDate: todayValue,
+      startDate: todayValue,
+    }
+  }
+
+  return undefined
+}
+
+function toDateValue(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
 }
 
 function TabButton({

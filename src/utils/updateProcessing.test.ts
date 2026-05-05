@@ -22,8 +22,13 @@ describe('order update processing', () => {
     const instacartOrder = orders.find(
       (order) => order.merchantName === 'Instacart',
     )
+    const gapOrder = orders.find((order) => order.merchantName === 'Gap')
+    const ultaOrder = orders.find(
+      (order) => order.merchantName === 'Ulta Beauty',
+    )
+    const sephoraOrder = orders.find((order) => order.merchantName === 'Sephora')
 
-    expect(orders).toHaveLength(5)
+    expect(orders).toHaveLength(11)
     expect(wholeFoodsOrders).toHaveLength(2)
     expect(wholeFoodsOrder).toMatchObject({
       deliveryStatus: 'delivered',
@@ -60,6 +65,26 @@ describe('order update processing', () => {
         'email_refund_confirmation',
       ]),
     )
+    expect(gapOrder).toMatchObject({
+      merchantName: 'Gap',
+      orderNumber: 'GP-4482',
+      orderTotal: 79.9,
+      status: 'shipped',
+      trackingNumber: '1Z999AA10123456784',
+    })
+    expect(ultaOrder).toMatchObject({
+      merchantName: 'Ulta Beauty',
+      orderNumber: 'UL-2209',
+      orderTotal: 46.72,
+      status: 'out_for_delivery',
+    })
+    expect(sephoraOrder).toMatchObject({
+      deliveryStatus: 'delivered',
+      merchantName: 'Sephora',
+      orderNumber: 'SE-7816',
+      orderTotal: 68.35,
+      status: 'delivered',
+    })
   })
 
   it('computes refunds, final charged amount, and merchant spend in code', () => {

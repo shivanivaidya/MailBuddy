@@ -1,0 +1,607 @@
+import { describe, expect, it, vi } from 'vitest'
+import { sampleEmails } from '@/services/sampleData'
+import {
+  answerAssistantWithToolPlanning,
+  finalizeAssistantToolResults,
+} from '@/utils/assistantToolAgent'
+import { extractActionItems } from '@/utils/mailProcessing'
+import { groupEmailsIntoThreads } from '@/utils/threadProcessing'
+import {
+  extractOrderUpdates,
+  generateMerchantSpendSummaries,
+} from '@/utils/updateProcessing'
+
+function createContext() {
+  const actions = extractActionItems(sampleEmails)
+  const orders = extractOrderUpdates(sampleEmails)
+
+  return {
+    actions,
+    dateRange: {
+      endDate: '2026-05-01',
+      startDate: '2026-04-27',
+    },
+    emails: sampleEmails,
+    merchantSpend: generateMerchantSpendSummaries(orders),
+    orders,
+    threads: groupEmailsIntoThreads(sampleEmails),
+  }
+}
+
+function createPlannerFetch(plan: unknown) {
+  return vi.fn().mockResolvedValue({
+    json: () => Promise.resolve({ plan }),
+    ok: true,
+  })
+}
+
+function createPlannerAndClassifierFetch(plan: unknown) {
+  return vi.fn((url: string, init?: RequestInit) => {
+    if (url === '/api/assistant/plan') {
+      return Promise.resolve({
+        json: () => Promise.resolve({ plan }),
+        ok: true,
+      })
+    }
+
+    if (url === '/api/assistant/classify-spend') {
+      const requestBody = JSON.parse(
+        typeof init?.body === 'string' ? init.body : '{}',
+      ) as { category?: string }
+
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            classifications:
+              requestBody.category === 'clothing'
+                ? clothingClassifications
+                : requestBody.category?.includes('beauty') ||
+                    requestBody.category === 'makeup'
+                  ? beautyClassifications
+                  : requestBody.category === 'sports'
+                    ? sportsClassifications
+                : groceryClassifications,
+          }),
+        ok: true,
+      })
+    }
+
+    return Promise.resolve({ ok: false })
+  }) as unknown as typeof fetch
+}
+
+const groceryClassifications = [
+  {
+    category: 'groceries',
+    confidence: 0.98,
+    include: true,
+    orderId: 'order_whole-foods-market_wf-1048',
+    reason: 'Whole Foods grocery items and pantry staples.',
+  },
+  {
+    category: 'groceries',
+    confidence: 0.95,
+    include: true,
+    orderId: 'order_instacart_ic-8831',
+    reason: 'Instacart order contains groceries.',
+  },
+  {
+    category: 'other',
+    confidence: 0.96,
+    include: false,
+    orderId: 'order_amazon-com_113-7429931-0056208',
+    reason: 'Electronics items.',
+  },
+  {
+    category: 'other',
+    confidence: 0.96,
+    include: false,
+    orderId: 'order_target_tg-6621',
+    reason: 'Retail household items and notebook.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_etsy_et-5938',
+    reason: 'Gift/home item.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_chewy_ch-7715',
+    reason: 'Pet supplies.',
+  },
+  {
+    category: 'other',
+    confidence: 0.98,
+    include: false,
+    orderId: 'order_thai-garden_dd-4102',
+    reason: 'Restaurant meal.',
+  },
+  {
+    category: 'groceries',
+    confidence: 0.96,
+    include: true,
+    orderId: 'order_whole-foods-market_wf-20491',
+    reason: 'Whole Foods grocery pickup.',
+  },
+]
+
+const clothingClassifications = [
+  {
+    category: 'clothing',
+    confidence: 0.98,
+    include: true,
+    orderId: 'order_gap_gp-4482',
+    reason: 'Gap order contains jeans and a cotton tee.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_whole-foods-market_wf-20491',
+    reason: 'Grocery pickup.',
+  },
+  {
+    category: 'other',
+    confidence: 0.96,
+    include: false,
+    orderId: 'order_ulta-beauty_ul-2209',
+    reason: 'Beauty products.',
+  },
+  {
+    category: 'other',
+    confidence: 0.96,
+    include: false,
+    orderId: 'order_sephora_se-7816',
+    reason: 'Beauty products.',
+  },
+]
+
+const beautyClassifications = [
+  {
+    category: 'beauty',
+    confidence: 0.98,
+    include: true,
+    orderId: 'order_ulta-beauty_ul-2209',
+    reason: 'Ulta order contains mascara and cleanser.',
+  },
+  {
+    category: 'beauty',
+    confidence: 0.98,
+    include: true,
+    orderId: 'order_sephora_se-7816',
+    reason: 'Sephora order contains moisturizer, lip balm, and sunscreen.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_gap_gp-4482',
+    reason: 'Clothing order.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_whole-foods-market_wf-20491',
+    reason: 'Grocery pickup.',
+  },
+]
+
+const sportsClassifications = [
+  {
+    category: 'sports gear',
+    confidence: 0.91,
+    include: true,
+    orderId: 'order_target_tg-6621',
+    reason: 'The classifier matched this order to the user-requested sports category.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_gap_gp-4482',
+    reason: 'Clothing order.',
+  },
+  {
+    category: 'other',
+    confidence: 0.97,
+    include: false,
+    orderId: 'order_whole-foods-market_wf-20491',
+    reason: 'Grocery pickup.',
+  },
+]
+
+describe('answerAssistantWithToolPlanning', () => {
+  it('uses a planned quick-action priority count', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'How many medium priority quick actions are there?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: {
+                priority: 'medium',
+                responseFormat: 'count',
+                status: 'suggested',
+              },
+              tool: 'listQuickActions',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Quick actions: medium priority',
+      message: expect.stringMatching(/^You have \d+ medium priority tasks\.$/),
+      type: 'answer',
+    })
+  })
+
+  it('uses a planned high-priority quick-action list', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'List the high priority quick actions',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: {
+                priority: 'high',
+                responseFormat: 'list',
+                status: 'suggested',
+              },
+              tool: 'listQuickActions',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(result.answer.message).toContain('Pay upcoming bill')
+    expect(result.answer.message).toContain('Submit registration before deadline')
+  })
+
+  it('uses planned tool calls for due dates, responses, orders, and spend', async () => {
+    await expect(
+      answerAssistantWithToolPlanning(
+        'When is the permission slip due?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { query: 'permission slip' },
+                tool: 'searchQuickActions',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        message: 'Sign and return permission slip is due friday.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'Has Dana given an estimate on kitchen repairs?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: {
+                  personName: 'Dana',
+                  topic: 'estimate kitchen repairs',
+                },
+                tool: 'trackResponseFromPerson',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        message: expect.stringContaining('No, I don’t see a response from Dana'),
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'Was my Whole Foods order delivered?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { query: 'Whole Foods delivered' },
+                tool: 'searchOrderUpdates',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        message: expect.stringContaining('delivered'),
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on groceries?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'groceries' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: groceries category',
+        message:
+          'You spent $192.75 on groceries in the requested period. Included merchants: Whole Foods Market, Instacart.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on clothes this month?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'clothing' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: clothing category',
+        message:
+          'You spent $79.90 on clothing in the requested period. Included merchants: Gap.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on beauty this month?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'beauty' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: beauty category',
+        message:
+          'You spent $115.07 on beauty in the requested period. Included merchants: Sephora, Ulta Beauty.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on beauty and skin care this month?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'beauty and skin care' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: beauty and skin care category',
+        message:
+          'You spent $115.07 on beauty and skin care in the requested period. Included merchants: Sephora, Ulta Beauty.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on sports this month?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'sports' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: sports category',
+        message:
+          'You spent $29.34 on sports in the requested period. Included merchants: Target.',
+        type: 'answer',
+      },
+    })
+  })
+
+  it('answers spend questions when the planner asks an unnecessary date clarification', async () => {
+    const mayContext = {
+      ...createContext(),
+      dateRange: {
+        endDate: '2026-05-31',
+        startDate: '2026-05-01',
+      },
+    }
+    const result = await answerAssistantWithToolPlanning(
+      'How much did I spend on makeup this month?',
+      mayContext,
+      {},
+      {
+        fetcher: createPlannerAndClassifierFetch({
+          clarificationQuestion:
+            'Do you mean April 2026 or the requested period?',
+          mode: 'clarification',
+          toolCalls: [],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Order totals: makeup category',
+      message:
+        'I didn’t find matching spend data for makeup in the requested period.',
+      type: 'no-data',
+    })
+  })
+
+  it('executes a planned conversation decision lookup for finalization', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'Have we finalized the restaurant for the team outing?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: { query: 'restaurant team outing finalized' },
+              tool: 'searchConversations',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(result.toolResults?.[0]).toMatchObject({
+      tool: 'searchConversations',
+    })
+    expect(JSON.stringify(result.toolResults)).toContain('Friday dinner reservation')
+  })
+
+  it('falls back if the planner returns an invalid or unsupported tool call', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'Write a poem about my inbox',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: {},
+              tool: 'writePoem',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      message:
+        'I don’t support that yet. I can help with quick actions, conversations, and order updates.',
+      type: 'unsupported',
+    })
+  })
+})
+
+describe('finalizeAssistantToolResults', () => {
+  it('sends executed tool results only to the finalizer endpoint', async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          message: 'You have 3 medium-priority quick actions.',
+        }),
+      ok: true,
+    })
+
+    const answer = await finalizeAssistantToolResults(
+      'How many medium priority quick actions are there?',
+      {
+        grounding: 'Quick actions: medium priority',
+        message: 'You have 3 medium priority tasks.',
+        type: 'answer',
+      },
+      [
+        {
+          arguments: {
+            priority: 'medium',
+            responseFormat: 'count',
+            status: 'suggested',
+          },
+          result: { count: 3 },
+          tool: 'listQuickActions',
+        },
+      ],
+      { fetcher },
+    )
+
+    const requestBody = JSON.parse(fetcher.mock.calls[0][1].body as string)
+
+    expect(fetcher).toHaveBeenCalledWith('/api/assistant/finalize', expect.any(Object))
+    expect(requestBody).toMatchObject({
+      question: 'How many medium priority quick actions are there?',
+      toolResults: [
+        {
+          result: { count: 3 },
+          tool: 'listQuickActions',
+        },
+      ],
+    })
+    expect(JSON.stringify(requestBody)).not.toContain('OPENAI_API_KEY')
+    expect(answer.message).toBe('You have 3 medium-priority quick actions.')
+  })
+})

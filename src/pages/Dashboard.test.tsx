@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { Dashboard } from '@/pages/Dashboard'
 
 function openDateFilter() {
-  fireEvent.click(screen.getByRole('button', { name: /Apr 27.*33 emails/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Apr 27.*48 emails/i }))
   return screen.getAllByLabelText('Date range value') as HTMLInputElement[]
 }
 
@@ -28,15 +28,22 @@ function closestArticle(text: string | RegExp) {
 }
 
 describe('Dashboard integration', () => {
-  it('renders extracted quick actions and supports edit, mark done, and dismiss flows', () => {
+  it('renders extracted quick actions and supports edit, mark done, and dismiss flows', async () => {
     render(<Dashboard />)
+
+    fireEvent.change(screen.getByPlaceholderText('Ask about tasks, conversations, or orders'), {
+      target: { value: 'Has Priya responded about team retreat?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(screen.getByText('Checking MailBuddy data...')).toBeInTheDocument()
+    expect(await screen.findByText(/Yes, Priya Shah replied/i)).toBeInTheDocument()
 
     expect(screen.getByText('Pay upcoming bill')).toBeInTheDocument()
     expect(
       screen.getByText('Follow up with Dana Repairs about Kitchen repair estimate'),
     ).toBeInTheDocument()
     expect(screen.getAllByText('No response received yet.').length).toBe(2)
-    expect(screen.getByRole('button', { name: /Quick actions\s*11/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Quick actions\s*15/i })).toBeInTheDocument()
 
     const billCard = closestArticle('Pay upcoming bill')
     fireEvent.click(within(billCard).getByRole('button', { name: 'Edit' }))
@@ -52,7 +59,7 @@ describe('Dashboard integration', () => {
         name: 'Mark done',
       }),
     )
-    expect(screen.getByRole('button', { name: /Quick actions\s*10/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Quick actions\s*14/i })).toBeInTheDocument()
 
     fireEvent.click(
       within(closestArticle('Sign and return permission slip')).getByRole(
@@ -62,7 +69,7 @@ describe('Dashboard integration', () => {
         },
       ),
     )
-    expect(screen.getByRole('button', { name: /Quick actions\s*9/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Quick actions\s*13/i })).toBeInTheDocument()
   })
 
   it('shows empty states in every tab when the global date range has no data', () => {
@@ -83,7 +90,7 @@ describe('Dashboard integration', () => {
   it('opens conversation context, supports reply links, and moves reviewed conversations', () => {
     render(<Dashboard />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Conversations\s*3/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Conversations\s*6/i }))
     fireEvent.click(closestArticle('Team retreat agenda'))
 
     expect(screen.getByText('Conversation context')).toBeInTheDocument()
@@ -105,14 +112,14 @@ describe('Dashboard integration', () => {
       }),
     )
 
-    expect(screen.getByRole('button', { name: /Conversations\s*2/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Conversations\s*5/i })).toBeInTheDocument()
     expect(screen.getByText('Reviewed (1)')).toBeInTheDocument()
   })
 
   it('opens order details with grouped source emails and structured refunds and replacements', () => {
     render(<Dashboard />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Updates\s*5/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Updates\s*11/i }))
     fireEvent.click(closestArticle('Order #WF-1048'))
 
     expect(screen.getByText('Order details')).toBeInTheDocument()

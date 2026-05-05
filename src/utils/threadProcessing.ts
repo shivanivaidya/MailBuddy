@@ -192,7 +192,6 @@ function createThreadSubject(emails: Email[]) {
 
 function createShortSummary(emails: Email[]) {
   const subject = createThreadSubject(emails).toLowerCase()
-  const latestEmail = emails[emails.length - 1]
 
   if (subject.includes('portland trip')) {
     return 'Portland trip is nearly decided: second weekend in May, riverfront lodging, and train booking.'
@@ -206,11 +205,10 @@ function createShortSummary(emails: Email[]) {
     return 'Team is finalizing event agenda with pending decisions on dinner options and workshop owners.'
   }
 
-  return summarizeEmail(latestEmail)
+  return createGenericShortSummary(emails)
 }
 
 function createDetailedSummary(emails: Email[]) {
-  const latestEmail = emails[emails.length - 1]
   const subject = createThreadSubject(emails).toLowerCase()
 
   if (subject.includes('team retreat')) {
@@ -237,51 +235,145 @@ function createDetailedSummary(emails: Email[]) {
     ]
   }
 
-  const bullets = [
-    createConversationSummary(emails),
-    summarizeThreadStatus(emails),
-  ]
-
-  if (latestEmail.direction === 'inbound') {
-    bullets.push('The latest message is waiting on the user side of the conversation.')
-  }
-
-  return bullets
+  return createGenericDetailedSummary(emails)
 }
 
-function createConversationSummary(emails: Email[]) {
+function createGenericShortSummary(emails: Email[]) {
+  const participants = formatParticipantList(getNonUserParticipants(emails))
+  const latestEmail = emails[emails.length - 1]
+  const ask = extractAsk(latestEmail.body)
+  const proposal = extractProposal(latestEmail.body)
+
+  if (ask && latestEmail.direction === 'inbound') {
+    return `${participants} are waiting on ${ask}.`
+  }
+
+  if (ask && latestEmail.direction === 'sent') {
+    return `You asked ${participants} to ${ask}.`
+  }
+
+  if (proposal) {
+    return `${participants} proposed ${proposal}.`
+  }
+
+  return `${participants} shared an update about ${createThreadSubject(emails).toLowerCase()}.`
+}
+
+function createGenericDetailedSummary(emails: Email[]) {
+  const bullets = [
+    summarizeConversationFlow(emails),
+    summarizeDecisionOrProposal(emails),
+    summarizeOpenAction(emails),
+    summarizeLatestUpdate(emails),
+  ].filter((bullet): bullet is string => Boolean(bullet))
+
+  return Array.from(new Set(bullets)).slice(0, 4)
+}
+
+function summarizeConversationFlow(emails: Email[]) {
+  const participants = formatParticipantList(getNonUserParticipants(emails))
   const subject = createThreadSubject(emails).toLowerCase()
 
-  if (subject.includes('portland trip')) {
-    return 'Maya and the user agreed on the second weekend in May and are deciding logistics.'
-  }
-
-  if (subject.includes('launch scope')) {
-    return 'Jordan and the user aligned on reducing Q2 launch scope while keeping reporting in.'
-  }
-
-  if (subject.includes('team retreat')) {
-    return 'The group is coordinating open retreat decisions across dinner, transport, workshop owners, and budget.'
-  }
-
-  return summarizeEmail(emails[emails.length - 1])
+  return `${participants} are discussing ${subject}.`
 }
 
-function summarizeEmail(email: Email) {
-  const normalizedBody = email.body.replace(/\s+/g, ' ').trim()
+function summarizeDecisionOrProposal(emails: Email[]) {
+  const messages = emails.map((email) => email.body)
+  const decision = messages.find((body) =>
+    /\b(agreed|confirmed|decided|finalized|finalised|booked|that works)\b/i.test(body),
+  )
+
+  if (decision) {
+    return `Decision signal: ${summarizeEmailBody(decision)}`
+  }
+
+  const proposal = messages.map(extractProposal).find(Boolean)
+
+  return proposal ? `Current proposal: ${proposal}.` : undefined
+}
+
+function summarizeOpenAction(emails: Email[]) {
+  const latestAskEmail = [...emails]
+    .reverse()
+    .find((email) => extractAsk(email.body) ?? extractConditionalNeed(email.body))
+
+  if (!latestAskEmail) {
+    return undefined
+  }
+
+  const directAsk = extractAsk(latestAskEmail.body)
+  const conditionalNeed = extractConditionalNeed(latestAskEmail.body)
+  const owner = directAsk
+    ? latestEmailOwner(latestAskEmail)
+    : 'Someone'
+  const ask = directAsk ?? conditionalNeed
+
+  return ask ? `Open action: ${owner} needs to ${ask}.` : undefined
+}
+
+function summarizeLatestUpdate(emails: Email[]) {
+  const latestEmail = emails[emails.length - 1]
+  const sender = latestEmail.direction === 'sent' ? 'You' : formatParticipantName(latestEmail.sender)
+
+  return `Latest update: ${sender} said ${summarizeEmailBody(latestEmail.body)}`
+}
+
+function summarizeEmailBody(body: string) {
+  const normalizedBody = body.replace(/\s+/g, ' ').trim()
   return normalizedBody.length > 96
     ? `${normalizedBody.slice(0, 93).trim()}...`
     : normalizedBody
 }
 
-function summarizeThreadStatus(emails: Email[]) {
-  const latestEmail = emails[emails.length - 1]
+function extractAsk(body: string) {
+  const askMatch = body.match(
+    /(?:(?:can|could)\s+(?:you|someone|we)\s+|please\s+)(.+?)(?:\?|\.|$)/i,
+  )
 
-  if (latestEmail.direction === 'sent') {
-    return 'Latest message was sent by you.'
+  if (!askMatch) {
+    return undefined
   }
 
-  return 'Latest message came from the sender.'
+  return askMatch[1].trim()
+}
+
+function extractConditionalNeed(body: string) {
+  const target = body.match(/\bif someone else handles\s+(.+?)(?:\.|$)/i)?.[1]?.trim()
+  return target ? `handle ${target}` : undefined
+}
+
+function extractProposal(body: string) {
+  const proposalMatch =
+    body.match(/([^.!?]*\b(?:works|available|can hold|can do|leaning toward|should|would)\b[^.!?]*)(?:[.!?]|$)/i) ??
+    body.match(/(?:let us|let's)\s+(.+?)(?:\.|$)/i)
+
+  return proposalMatch?.[1]?.trim()
+}
+
+function latestEmailOwner(email: Email) {
+  return email.direction === 'sent'
+    ? formatParticipantName(email.recipients?.[0] ?? 'recipient')
+    : 'You'
+}
+
+function getNonUserParticipants(emails: Email[]) {
+  return getParticipants(emails).filter((participant) => participant !== 'Me')
+}
+
+function formatParticipantList(participants: string[]) {
+  if (!participants.length) {
+    return 'The thread'
+  }
+
+  if (participants.length === 1) {
+    return participants[0]
+  }
+
+  if (participants.length === 2) {
+    return `${participants[0]} and ${participants[1]}`
+  }
+
+  return `${participants.slice(0, 2).join(', ')} and ${participants.length - 2} others`
 }
 
 function normalizeSubject(subject: string) {

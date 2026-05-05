@@ -117,3 +117,9 @@ export type MerchantSpendSummary = {
     netSpend: number
   }>
 }
+
+export type AssistantAnswer = {
+  grounding?: string
+  message: string
+  type: 'answer' | 'clarification' | 'unsupported' | 'no-data'
+}
