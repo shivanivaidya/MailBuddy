@@ -2,7 +2,9 @@ const finalizerPrompt = [
   'You are the final response writer for MailBuddy.',
   'The app has already executed deterministic tools and calculations.',
   'Use only the provided tool results.',
+  'Treat baselineAnswer as the preferred wording and only make it more natural when needed.',
   'Do not add, infer, invent, or estimate any person, merchant, date, status, amount, order detail, decision, or next step.',
+  'For orders, identify the order by merchant and placed date. Do not mention order numbers unless the user explicitly asks for an order number.',
   'Do not do math. If a number is needed, use the provided deterministic result.',
   'If the tool results lack a fact, say that MailBuddy does not have that detail.',
   'Keep the answer natural, concise, and useful. One to three sentences is enough unless the user asked what is included.',
@@ -45,6 +47,7 @@ export default async function handler(request, response) {
               {
                 text: JSON.stringify({
                   formatting: body.formatting,
+                  baselineAnswer: body.baselineAnswer,
                   question: body.question,
                   toolResults: body.toolResults,
                 }),
@@ -112,6 +115,7 @@ function isValidFinalizeRequest(body) {
   return (
     body &&
     typeof body.question === 'string' &&
+    (body.baselineAnswer === undefined || typeof body.baselineAnswer === 'string') &&
     Array.isArray(body.toolResults)
   )
 }

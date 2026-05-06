@@ -15,6 +15,10 @@ const assistantApiRoutes = {
     import.meta.url,
   ).href,
   '/api/assistant/plan': new URL('./api/assistant/plan.js', import.meta.url).href,
+  '/api/assistant/answer-conversation': new URL(
+    './api/assistant/answer-conversation.js',
+    import.meta.url,
+  ).href,
 }
 
 // https://vite.dev/config/

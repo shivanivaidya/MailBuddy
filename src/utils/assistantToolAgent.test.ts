@@ -70,6 +70,46 @@ function createPlannerAndClassifierFetch(plan: unknown) {
   }) as unknown as typeof fetch
 }
 
+function createPlannerAndConversationAnswerFetch(
+  plan: unknown,
+  answer: {
+    answer: string
+    conversationId: string | null
+    type: 'answer' | 'no-data'
+  },
+  onAnswerRequest?: (body: unknown) => void,
+) {
+  return vi.fn((url: string, init?: RequestInit) => {
+    if (url === '/api/assistant/plan') {
+      return Promise.resolve({
+        json: () => Promise.resolve({ plan }),
+        ok: true,
+      })
+    }
+
+    if (url === '/api/assistant/answer-conversation') {
+      onAnswerRequest?.(
+        JSON.parse(typeof init?.body === 'string' ? init.body : '{}'),
+      )
+
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            answer: {
+              ...answer,
+              reason: answer.conversationId
+                ? 'Answered from the best matching candidate conversation.'
+                : null,
+            },
+          }),
+        ok: true,
+      })
+    }
+
+    return Promise.resolve({ ok: false })
+  }) as unknown as typeof fetch
+}
+
 const groceryClassifications = [
   {
     category: 'groceries',
@@ -323,18 +363,70 @@ describe('answerAssistantWithToolPlanning', () => {
       },
     })
 
+    const wholeFoodsResult = await answerAssistantWithToolPlanning(
+      'Was my Whole Foods order delivered?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: { query: 'Whole Foods delivered' },
+              tool: 'searchOrderUpdates',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(wholeFoodsResult).toMatchObject({
+      answer: {
+        message: expect.stringContaining(
+          'Whole Foods Market order placed on May 1, 2026 is out for delivery',
+        ),
+        type: 'answer',
+      },
+    })
+
+    const aprilWholeFoodsResult = await answerAssistantWithToolPlanning(
+      'What about the one placed on April 30th?',
+      createContext(),
+      wholeFoodsResult.memory,
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: { query: 'budget review notes' },
+              tool: 'searchConversations',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(aprilWholeFoodsResult).toMatchObject({
+      answer: {
+        message: expect.stringContaining(
+          'Whole Foods Market order placed on April 30, 2026 is delivered',
+        ),
+        type: 'answer',
+      },
+    })
+
     await expect(
       answerAssistantWithToolPlanning(
-        'Was my Whole Foods order delivered?',
+        'Was anything replaced or refunded?',
         createContext(),
-        {},
+        aprilWholeFoodsResult.memory,
         {
           fetcher: createPlannerFetch({
             mode: 'tool_calls',
             toolCalls: [
               {
-                arguments: { query: 'Whole Foods delivered' },
-                tool: 'searchOrderUpdates',
+                arguments: { category: 'refunds' },
+                tool: 'calculateRefundTotals',
               },
             ],
           }),
@@ -342,7 +434,9 @@ describe('answerAssistantWithToolPlanning', () => {
       ),
     ).resolves.toMatchObject({
       answer: {
-        message: expect.stringContaining('delivered'),
+        message: expect.stringContaining(
+          'Whole Foods Market order placed on April 30, 2026: Replacements: Organic strawberries were replaced with organic blueberries. No refunds found.',
+        ),
         type: 'answer',
       },
     })
@@ -392,9 +486,9 @@ describe('answerAssistantWithToolPlanning', () => {
       ),
     ).resolves.toMatchObject({
       answer: {
-        grounding: 'Order totals: clothing category',
+        grounding: 'Order totals: clothes category',
         message:
-          'You spent $79.90 on clothing in the requested period. Included merchants: Gap.',
+          'You spent $79.90 on clothes in the requested period. Included merchants: Gap.',
         type: 'answer',
       },
     })
@@ -447,6 +541,32 @@ describe('answerAssistantWithToolPlanning', () => {
         grounding: 'Order totals: beauty and skin care category',
         message:
           'You spent $115.07 on beauty and skin care in the requested period. Included merchants: Sephora, Ulta Beauty.',
+        type: 'answer',
+      },
+    })
+
+    await expect(
+      answerAssistantWithToolPlanning(
+        'How much did I spend on makeup this month?',
+        createContext(),
+        {},
+        {
+          fetcher: createPlannerAndClassifierFetch({
+            mode: 'tool_calls',
+            toolCalls: [
+              {
+                arguments: { category: 'beauty' },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      answer: {
+        grounding: 'Order totals: makeup category',
+        message:
+          'You spent $115.07 on makeup in the requested period. Included merchants: Sephora, Ulta Beauty.',
         type: 'answer',
       },
     })
@@ -506,6 +626,44 @@ describe('answerAssistantWithToolPlanning', () => {
         'I didn’t find matching spend data for makeup in the requested period.',
       type: 'no-data',
     })
+
+    const aprilContext = {
+      ...createContext(),
+      dateRange: {
+        endDate: '2026-04-30',
+        startDate: '2026-04-01',
+      },
+    }
+    const followUpResult = await answerAssistantWithToolPlanning(
+      'How about last month?',
+      aprilContext,
+      result.memory,
+      {
+        fetcher: createPlannerAndClassifierFetch({
+          clarificationQuestion:
+            'Are you asking for a summary of quick actions from last month?',
+          mode: 'clarification',
+          toolCalls: [],
+        }),
+      },
+    )
+
+    expect(followUpResult).toMatchObject({
+      answer: {
+        grounding: 'Order totals: makeup category',
+        message:
+          'You spent $115.07 on makeup in the requested period. Included merchants: Sephora, Ulta Beauty.',
+        type: 'answer',
+      },
+    })
+    expect(followUpResult.memory.recentTurns?.at(-1)).toMatchObject({
+      domain: 'spend',
+      entities: {
+        category: 'makeup',
+      },
+      query: 'How about last month?',
+      type: 'answer',
+    })
   })
 
   it('answers task due-date questions when the planner asks an unnecessary clarification', async () => {
@@ -530,13 +688,90 @@ describe('answerAssistantWithToolPlanning', () => {
     })
   })
 
-  it('executes a planned conversation decision lookup for finalization', async () => {
+  it('answers response-tracking questions when the planner asks an unnecessary clarification', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'Has Dana given an estimate on kitchen repairs?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          clarificationQuestion:
+            'Do you mean quick actions or conversations?',
+          mode: 'clarification',
+          toolCalls: [],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      message: expect.stringContaining('No, I don’t see an estimate from Dana Repairs'),
+      type: 'answer',
+    })
+  })
+
+  it('answers conversation message questions with the LLM when the planner asks an unnecessary clarification', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'What did Sam say in the outing thread?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerAndConversationAnswerFetch({
+          clarificationQuestion:
+            "Do you mean the thread named 'outing'?",
+          mode: 'clarification',
+          toolCalls: [],
+        }, {
+          answer: 'I don’t see a message from Sam in the Neighborhood outing thread.',
+          conversationId: 'thread_neighborhood-outing',
+          type: 'no-data',
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Conversation: Neighborhood outing',
+      message: 'I don’t see a message from Sam in the Neighborhood outing thread.',
+      type: 'no-data',
+    })
+  })
+
+  it('answers conversation questions with the LLM when the planner asks an unnecessary clarification', async () => {
     const result = await answerAssistantWithToolPlanning(
       'Have we finalized the restaurant for the team outing?',
       createContext(),
       {},
       {
-        fetcher: createPlannerFetch({
+        fetcher: createPlannerAndConversationAnswerFetch({
+          clarificationQuestion:
+            "Do you mean the neighborhood outing or dinner reservation?",
+          mode: 'clarification',
+          toolCalls: [],
+        }, {
+          answer:
+            'Not yet. In the Team retreat agenda thread, dinner options still need confirmation.',
+          conversationId: 'thread_team-retreat-agenda',
+          type: 'answer',
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Conversation: Team retreat agenda',
+      message:
+        'Not yet. In the Team retreat agenda thread, dinner options still need confirmation.',
+      type: 'answer',
+    })
+    expect(result.answer.message).not.toContain('table for six at 7 PM')
+  })
+
+  it('answers planned conversation lookups with full candidate context', async () => {
+    let answerRequest: unknown
+    const result = await answerAssistantWithToolPlanning(
+      'Have we finalized the restaurant for the team outing?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerAndConversationAnswerFetch({
           mode: 'tool_calls',
           toolCalls: [
             {
@@ -544,14 +779,27 @@ describe('answerAssistantWithToolPlanning', () => {
               tool: 'searchConversations',
             },
           ],
+        }, {
+          answer:
+            'Not yet. In the Team retreat agenda thread, dinner options still need confirmation.',
+          conversationId: 'thread_team-retreat-agenda',
+          type: 'answer',
+        }, (body) => {
+          answerRequest = body
         }),
       },
     )
 
-    expect(result.toolResults?.[0]).toMatchObject({
-      tool: 'searchConversations',
+    expect(result.answer).toMatchObject({
+      grounding: 'Conversation: Team retreat agenda',
+      message:
+        'Not yet. In the Team retreat agenda thread, dinner options still need confirmation.',
+      type: 'answer',
     })
-    expect(JSON.stringify(result.toolResults)).toContain('Friday dinner reservation')
+    expect(JSON.stringify(answerRequest)).toContain('"Work"')
+    expect(JSON.stringify(answerRequest)).toContain('Can someone confirm dinner options')
+    expect(JSON.stringify(answerRequest)).not.toContain('Friday dinner reservation')
+    expect(JSON.stringify(answerRequest)).not.toContain('they can hold a table for six')
   })
 
   it('falls back if the planner returns an invalid or unsupported tool call', async () => {
@@ -615,6 +863,7 @@ describe('finalizeAssistantToolResults', () => {
 
     expect(fetcher).toHaveBeenCalledWith('/api/assistant/finalize', expect.any(Object))
     expect(requestBody).toMatchObject({
+      baselineAnswer: 'You have 3 medium priority tasks.',
       question: 'How many medium priority quick actions are there?',
       toolResults: [
         {
@@ -625,5 +874,50 @@ describe('finalizeAssistantToolResults', () => {
     })
     expect(JSON.stringify(requestBody)).not.toContain('OPENAI_API_KEY')
     expect(answer.message).toBe('You have 3 medium-priority quick actions.')
+  })
+
+  it('keeps order numbers out of the finalizer payload', async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          message:
+            'Whole Foods Market order placed on May 1, 2026 is out for delivery.',
+        }),
+      ok: true,
+    })
+
+    await finalizeAssistantToolResults(
+      'Was my Whole Foods order delivered?',
+      {
+        grounding: 'Order: Whole Foods Market #WF-20491',
+        message: 'Whole Foods Market order placed on May 1, 2026 is out for delivery.',
+        type: 'answer',
+      },
+      [
+        {
+          arguments: { query: 'Whole Foods delivered' },
+          result: {
+            count: 1,
+            orders: [
+              {
+                merchantName: 'Whole Foods Market',
+                orderDate: '2026-05-01T16:15:00.000Z',
+                orderNumber: 'WF-20491',
+                status: 'out_for_delivery',
+              },
+            ],
+          },
+          tool: 'searchOrderUpdates',
+        },
+      ],
+      { fetcher },
+    )
+
+    const requestBody = JSON.parse(fetcher.mock.calls[0][1].body as string)
+
+    expect(requestBody.baselineAnswer).toBe(
+      'Whole Foods Market order placed on May 1, 2026 is out for delivery.',
+    )
+    expect(JSON.stringify(requestBody.toolResults)).not.toContain('WF-20491')
   })
 })

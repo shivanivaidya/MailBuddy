@@ -74,7 +74,7 @@ export function Dashboard() {
   function askAssistant(query: string) {
     const requestId = assistantRequestId.current + 1
     assistantRequestId.current = requestId
-    const assistantDateRange = getAssistantDateRange(query)
+    const assistantDateRange = getAssistantDateRange(query, emails)
     const assistantContext = {
       actions,
       dateRange: assistantDateRange,
@@ -103,23 +103,26 @@ export function Dashboard() {
       assistantContext,
       assistantMemory,
     )
-      .then((plannedResult) => {
+      .then(async (plannedResult) => {
         if (assistantRequestId.current !== requestId) {
-          return fallback.answer
+          return undefined
         }
 
-        setAssistantAnswer(plannedResult.answer)
-        setAssistantMemory(plannedResult.memory)
-
-        return finalizeAssistantToolResults(
+        const finalAnswer = await finalizeAssistantToolResults(
           query,
           plannedResult.answer,
           plannedResult.toolResults,
         )
+
+        return {
+          answer: finalAnswer,
+          memory: plannedResult.memory,
+        }
       })
-      .then((finalAnswer) => {
-        if (assistantRequestId.current === requestId) {
-          setAssistantAnswer(finalAnswer)
+      .then((finalResult) => {
+        if (assistantRequestId.current === requestId && finalResult) {
+          setAssistantAnswer(finalResult.answer)
+          setAssistantMemory(finalResult.memory)
         }
       })
       .finally(() => {
@@ -249,9 +252,9 @@ export function Dashboard() {
   )
 }
 
-function getAssistantDateRange(query: string) {
+function getAssistantDateRange(query: string, emails: Array<{ date: string }>) {
   const normalizedQuery = query.toLowerCase()
-  const today = new Date()
+  const today = getAssistantAnchorDate(emails)
 
   if (normalizedQuery.includes('this month')) {
     const year = today.getFullYear()
@@ -298,6 +301,20 @@ function toDateValue(value: Date) {
   const day = String(value.getDate()).padStart(2, '0')
 
   return `${year}-${month}-${day}`
+}
+
+function getAssistantAnchorDate(emails: Array<{ date: string }>) {
+  const latestEmailDate = emails
+    .map((email) => new Date(email.date))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((firstDate, secondDate) => secondDate.getTime() - firstDate.getTime())[0]
+  const currentDate = new Date()
+
+  if (!latestEmailDate || currentDate.getTime() > latestEmailDate.getTime()) {
+    return currentDate
+  }
+
+  return latestEmailDate
 }
 
 function TabButton({

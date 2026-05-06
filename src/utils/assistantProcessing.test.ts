@@ -8,6 +8,7 @@ import {
   searchQuickActions,
   searchConversationMessages,
   trackResponseFromPerson,
+  type AssistantMemory,
 } from '@/utils/assistantProcessing'
 import { extractActionItems } from '@/utils/mailProcessing'
 import { groupEmailsIntoThreads } from '@/utils/threadProcessing'
@@ -254,7 +255,28 @@ describe('answerAssistantQuery', () => {
 
     expect(
       answerAssistantQuery('Was my Whole Foods order delivered?', context).message,
-    ).toContain('Whole Foods Market order #WF-1048 is delivered')
+    ).toContain('Whole Foods Market order placed on May 1, 2026 is out for delivery')
+    const wholeFoodsTurn = answerAssistantTurn(
+      'Was my Whole Foods order delivered?',
+      context,
+    )
+    const aprilWholeFoodsTurn = answerAssistantTurn(
+      'What about the one placed on April 30th?',
+      context,
+      wholeFoodsTurn.memory,
+    )
+    expect(aprilWholeFoodsTurn.answer.message).toContain(
+      'Whole Foods Market order placed on April 30, 2026 is delivered',
+    )
+    expect(
+      answerAssistantTurn(
+        'Was anything replaced or refunded?',
+        context,
+        aprilWholeFoodsTurn.memory,
+      ).answer.message,
+    ).toContain(
+      'Whole Foods Market order placed on April 30, 2026: Replacements: Organic strawberries were replaced with organic blueberries. No refunds found.',
+    )
     expect(
       answerAssistantQuery('What is the tracking number for Amazon?', context),
     ).toMatchObject({
@@ -309,5 +331,33 @@ describe('answerAssistantQuery', () => {
           'I don’t support that yet. I can help with quick actions, conversations, and order updates.',
         type: 'unsupported',
       })
+  })
+
+  it('keeps a compact rolling history of the last five turns', () => {
+    const context = createContext()
+    const queries = [
+      'What do I need to do today?',
+      'Was my Whole Foods order delivered?',
+      'What about the one placed on April 30th?',
+      'Was anything replaced or refunded?',
+      'How much did I spend this month?',
+      'How much did I spend on Whole Foods this month?',
+    ]
+    const memory = queries.reduce<AssistantMemory>(
+      (currentMemory, query) =>
+        answerAssistantTurn(query, context, currentMemory).memory,
+      {},
+    )
+
+    expect(memory.recentTurns).toHaveLength(5)
+    expect(memory.recentTurns?.[0].query).toBe('Was my Whole Foods order delivered?')
+    expect(memory.recentTurns?.at(-1)).toMatchObject({
+      domain: 'spend',
+      entities: {
+        category: undefined,
+      },
+      query: 'How much did I spend on Whole Foods this month?',
+      type: 'answer',
+    })
   })
 })

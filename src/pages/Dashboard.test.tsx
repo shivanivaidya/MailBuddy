@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Dashboard } from '@/pages/Dashboard'
 
 function openDateFilter() {
@@ -28,6 +28,10 @@ function closestArticle(text: string | RegExp) {
 }
 
 describe('Dashboard integration', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('renders extracted quick actions and supports edit, mark done, and dismiss flows', async () => {
     render(<Dashboard />)
 
@@ -70,6 +74,69 @@ describe('Dashboard integration', () => {
       ),
     )
     expect(screen.getByRole('button', { name: /Quick actions\s*13/i })).toBeInTheDocument()
+  })
+
+  it('shows only the final assistant answer after finalization completes', async () => {
+    let resolveFinalizer: (value: Response) => void = () => undefined
+    const finalizerResponse = new Promise<Response>((resolve) => {
+      resolveFinalizer = resolve
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (async (input: RequestInfo | URL) => {
+        const url = String(input)
+
+        if (url === '/api/assistant/plan') {
+          return new Response(
+            JSON.stringify({
+              plan: {
+                mode: 'tool_calls',
+                toolCalls: [
+                  {
+                    arguments: {
+                      priority: 'medium',
+                      responseFormat: 'count',
+                      status: 'suggested',
+                    },
+                    tool: 'listQuickActions',
+                  },
+                ],
+              },
+            }),
+            { status: 200 },
+          )
+        }
+
+        if (url === '/api/assistant/finalize') {
+          return finalizerResponse
+        }
+
+        return new Response(null, { status: 404 })
+      }) as typeof fetch,
+    )
+
+    render(<Dashboard />)
+
+    fireEvent.change(screen.getByPlaceholderText('Ask about tasks, conversations, or orders'), {
+      target: { value: 'How many medium priority tasks are there?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(screen.getByText('Checking MailBuddy data...')).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/assistant/finalize',
+      expect.any(Object),
+    ))
+    expect(screen.queryByText('You have 3 medium priority tasks.')).not.toBeInTheDocument()
+
+    resolveFinalizer(
+      new Response(
+        JSON.stringify({ message: 'Final answer only.' }),
+        { status: 200 },
+      ),
+    )
+
+    expect(await screen.findByText('Final answer only.')).toBeInTheDocument()
+    expect(screen.queryByText('Checking MailBuddy data...')).not.toBeInTheDocument()
   })
 
   it('shows empty states in every tab when the global date range has no data', () => {

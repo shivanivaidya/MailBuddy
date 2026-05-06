@@ -1,4 +1,9 @@
-import type { ActionItem, AssistantAnswer, OrderUpdate } from '@/types/mail'
+import type {
+  ActionItem,
+  AssistantAnswer,
+  EmailThread,
+  OrderUpdate,
+} from '@/types/mail'
 import {
   answerAssistantTurn,
   calculateMerchantSpend,
@@ -12,6 +17,7 @@ import {
   searchOrderUpdates,
   searchQuickActions,
   trackResponseFromPerson,
+  recordAssistantTurn,
   type AssistantContext,
   type AssistantDateRange,
   type AssistantMemory,
@@ -51,6 +57,15 @@ type AssistantPlanResponse = {
   plan?: AssistantToolPlan
 }
 
+type AssistantConversationAnswerResponse = {
+  answer?: {
+    answer?: string
+    conversationId?: string | null
+    reason?: string | null
+    type?: 'answer' | 'no-data'
+  }
+}
+
 export type AssistantToolResult = {
   arguments: ToolArguments
   result: unknown
@@ -71,6 +86,61 @@ type SpendClassification = {
   include: boolean
   orderId: string
   reason: string
+}
+
+function createToolAgentResult(
+  answer: AssistantAnswer,
+  memory: AssistantMemory,
+  toolResults: AssistantToolResult[],
+  query: string,
+): ToolAgentResult {
+  const nextMemory = rememberToolResultContext(memory, toolResults, query)
+
+  return {
+    answer,
+    memory: recordAssistantTurn(query, answer, nextMemory),
+    toolResults,
+  }
+}
+
+function rememberToolResultContext(
+  memory: AssistantMemory,
+  toolResults: AssistantToolResult[],
+  query: string,
+): AssistantMemory {
+  const first = toolResults[0]
+
+  if (
+    first?.tool === 'calculateMerchantSpend' ||
+    first?.tool === 'calculateRefundTotals'
+  ) {
+    const result = first.result as {
+      category?: string | null
+      merchantNames?: string[]
+    }
+    const category = getDisplaySpendCategory(query, result.category ?? null)
+
+    return {
+      ...memory,
+      lastSuccessfulDomain: 'spend',
+      spendContext: {
+        category: category ?? getRecentSpendCategory(memory),
+        merchantNames: result.merchantNames?.length
+          ? result.merchantNames
+          : memory.spendContext?.merchantNames,
+      },
+    }
+  }
+
+  return memory
+}
+
+function getRecentSpendCategory(memory: AssistantMemory) {
+  return memory.spendContext?.category ??
+    [...(memory.recentTurns ?? [])]
+      .reverse()
+      .find((turn) => turn.domain === 'spend' && turn.entities.category)
+      ?.entities.category
 }
 
 const supportedTools: AssistantToolName[] = [
@@ -164,6 +234,10 @@ export async function answerAssistantWithToolPlanning(
 ): Promise<ToolAgentResult> {
   const fallback = answerAssistantTurn(query, context, memory)
 
+  if (isOrderFollowUp(query, memory) && fallback.answer.type === 'answer') {
+    return fallback
+  }
+
   try {
     const plan = await requestAssistantPlan(query, context.dateRange, options)
     if (!validateAssistantToolPlan(plan)) {
@@ -171,19 +245,30 @@ export async function answerAssistantWithToolPlanning(
     }
 
     if (plan.mode === 'clarification') {
+      const conversationResult = await answerConversationQuestionWithLlm(
+        query,
+        context,
+        fallback.memory,
+        options,
+      )
+
+      if (conversationResult) {
+        return conversationResult
+      }
+
+      if (fallback.answer.type === 'answer') {
+        return fallback
+      }
+
       const localPlan =
-        createQuickActionPlanFromQuestion(query) ?? createSpendPlanFromQuestion(query)
+        createQuickActionPlanFromQuestion(query) ?? createSpendPlanFromQuestion(query, fallback.memory)
 
       if (localPlan) {
         const toolResults = await executeAssistantToolPlan(localPlan, context, options)
-        const answer = createAnswerFromToolResults(toolResults)
+        const answer = createAnswerFromToolResults(toolResults, query)
 
         if (answer) {
-          return {
-            answer,
-            memory: fallback.memory,
-            toolResults,
-          }
+          return createToolAgentResult(answer, fallback.memory, toolResults, query)
         }
       }
 
@@ -192,7 +277,10 @@ export async function answerAssistantWithToolPlanning(
           message: plan.clarificationQuestion ?? 'Can you clarify what you mean?',
           type: 'clarification',
         },
-        memory,
+        memory: recordAssistantTurn(query, {
+          message: plan.clarificationQuestion ?? 'Can you clarify what you mean?',
+          type: 'clarification',
+        }, memory),
       }
     }
 
@@ -200,21 +288,239 @@ export async function answerAssistantWithToolPlanning(
       return fallback
     }
 
+    if (shouldUseConversationAnswer(query, plan)) {
+      const conversationResult = await answerConversationQuestionWithLlm(
+        query,
+        context,
+        fallback.memory,
+        options,
+      )
+
+      if (conversationResult) {
+        return conversationResult
+      }
+    }
+
     const toolResults = await executeAssistantToolPlan(plan, context, options)
-    const answer = createAnswerFromToolResults(toolResults)
+    const answer = createAnswerFromToolResults(toolResults, query)
 
     if (!answer) {
       return fallback
     }
 
-    return {
-      answer,
-      memory: fallback.memory,
-      toolResults,
-    }
+    return createToolAgentResult(answer, fallback.memory, toolResults, query)
   } catch {
     return fallback
   }
+}
+
+function isOrderFollowUp(query: string, memory: AssistantMemory) {
+  if (memory.lastSuccessfulDomain !== 'order_updates' && !memory.orderContext) {
+    return false
+  }
+
+  return /\b(it|that|this|one)\b|\bplaced\s+on\b|\b(refund|refunded|replaced|replacement|tracking|delivered|delivery|shipped|shipping|pickup|anything)\b/i.test(query)
+}
+
+async function answerConversationQuestionWithLlm(
+  query: string,
+  context: AssistantContext,
+  memory: AssistantMemory,
+  options: ToolAgentOptions,
+): Promise<ToolAgentResult | undefined> {
+  if (!isConversationQuestion(query)) {
+    return undefined
+  }
+
+  const candidates = searchConversations('', context.dateRange, context)
+
+  if (!candidates.length) {
+    return undefined
+  }
+
+  const conversationAnswer = await requestConversationAnswer(
+    query,
+    candidates,
+    options,
+  )
+  const selectedThread = conversationAnswer?.conversationId
+    ? getConversationDetails(conversationAnswer.conversationId, context.dateRange, context)
+    : undefined
+
+  if (!conversationAnswer?.message) {
+    return undefined
+  }
+  const answer: AssistantAnswer = {
+    grounding: selectedThread
+      ? `Conversation: ${selectedThread.subject}`
+      : 'Conversations',
+    message: conversationAnswer.message,
+    type: conversationAnswer.type === 'answer' ? 'answer' : 'no-data',
+  }
+  const nextMemory: AssistantMemory = selectedThread
+    ? {
+        ...memory,
+        lastSuccessfulDomain: 'conversations',
+        threadContext: {
+          conversationId: selectedThread.id,
+          subject: selectedThread.subject,
+        },
+      }
+    : memory
+
+  return {
+    answer,
+    memory: recordAssistantTurn(query, answer, nextMemory),
+  }
+}
+
+async function requestConversationAnswer(
+  query: string,
+  candidates: EmailThread[],
+  options: ToolAgentOptions,
+) {
+  const fetcher = options.fetcher ?? fetch
+  const scopedCandidates = scopeConversationCandidates(query, candidates)
+  const compactCandidates = scopedCandidates
+    .slice(0, 12)
+    .map(compactConversationCandidate)
+
+  try {
+    const response = await fetcher('/api/assistant/answer-conversation', {
+      body: JSON.stringify({
+        candidates: compactCandidates,
+        question: query,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    })
+
+    if (!response.ok) {
+      return undefined
+    }
+
+    const data = (await response.json()) as AssistantConversationAnswerResponse
+    const conversationId = data.answer?.conversationId
+    const validIds = new Set(compactCandidates.map((candidate) => candidate.id))
+    const message = data.answer?.answer?.trim()
+    const type = data.answer?.type === 'answer' ? 'answer' : 'no-data'
+
+    if (!message) {
+      return undefined
+    }
+
+    return {
+      conversationId: conversationId && validIds.has(conversationId)
+        ? conversationId
+        : null,
+      message,
+      type,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function scopeConversationCandidates(query: string, candidates: EmailThread[]) {
+  const qualifiers = extractConversationQualifiers(query)
+
+  if (!qualifiers.length) {
+    return candidates
+  }
+
+  const scopedCandidates = candidates.filter((candidate) =>
+    qualifiers.some((qualifier) =>
+      getConversationCandidateSearchText(candidate).includes(qualifier),
+    ),
+  )
+
+  return scopedCandidates.length ? scopedCandidates : candidates
+}
+
+function extractConversationQualifiers(query: string) {
+  const normalizedQuery = query.toLowerCase()
+  const qualifiers = [
+    'team',
+    'work',
+    'school',
+    'family',
+    'neighborhood',
+    'project',
+    'vendor',
+    'friend',
+    'client',
+    'customer',
+    'home',
+    'travel',
+  ]
+
+  return qualifiers.filter((qualifier) =>
+    new RegExp(`\\b${qualifier}\\b`, 'i').test(normalizedQuery),
+  )
+}
+
+function getConversationCandidateSearchText(thread: EmailThread) {
+  return [
+    thread.subject,
+    thread.shortSummary,
+    ...thread.participants,
+    ...thread.detailedSummaryBullets,
+    ...thread.emails.flatMap((email) => [
+      email.sender,
+      email.subject,
+      email.body,
+      ...(email.labels ?? []),
+      ...(email.recipients ?? []),
+    ]),
+  ].join(' ').toLowerCase()
+}
+
+function compactConversationCandidate(thread: EmailThread) {
+  return {
+    detailedSummaryBullets: thread.detailedSummaryBullets,
+    id: thread.id,
+    labels: dedupe(thread.emails.flatMap((email) => email.labels ?? [])).slice(0, 12),
+    latestMessage: expandEmailForSelection(thread.latestEmail),
+    messages: thread.emails.map(expandEmailForSelection),
+    participants: thread.participants,
+    subject: thread.subject,
+    summary: thread.shortSummary,
+  }
+}
+
+function expandEmailForSelection(email: {
+  body: string
+  date: string
+  direction: string
+  labels?: string[]
+  recipients?: string[]
+  sender: string
+  subject: string
+}) {
+  return {
+    body: email.body,
+    date: email.date,
+    direction: email.direction,
+    labels: email.labels ?? [],
+    recipients: email.recipients ?? [],
+    sender: email.sender,
+    subject: email.subject,
+  }
+}
+
+function shouldUseConversationAnswer(query: string, plan: AssistantToolPlan) {
+  return (
+    isConversationQuestion(query) &&
+    plan.toolCalls.some((call) =>
+      ['searchConversations', 'searchConversationMessages', 'getConversationDetails']
+        .includes(call.tool),
+    )
+  )
+}
+
+function isConversationQuestion(query: string) {
+  return /\b(conversation|thread|reply|respond|replied|finalized|finalised|decided|latest|said|say|told|tell|restaurant|outing|dinner|agenda|retreat)\b/i
+    .test(query)
 }
 
 function createQuickActionPlanFromQuestion(
@@ -252,7 +558,10 @@ function extractQuickActionQuery(query: string) {
     .trim() || query
 }
 
-function createSpendPlanFromQuestion(query: string): AssistantToolPlan | undefined {
+function createSpendPlanFromQuestion(
+  query: string,
+  memory: AssistantMemory = {},
+): AssistantToolPlan | undefined {
   const normalizedQuery = query.toLowerCase()
   const isRefundQuestion = /\brefund|refunded|reimburse|reimbursed\b/.test(
     normalizedQuery,
@@ -261,18 +570,24 @@ function createSpendPlanFromQuestion(query: string): AssistantToolPlan | undefin
     isRefundQuestion ||
     /\bspend|spent|buy|bought|purchase|purchased|order|orders|paid\b/.test(
       normalizedQuery,
-    )
+    ) ||
+    (Boolean(getRecentSpendCategory(memory)) &&
+      /\b(last|this|next)\s+(week|month|year)\b|\b(today|yesterday|tomorrow)\b/.test(
+        normalizedQuery,
+      ))
 
   if (!isSpendQuestion) {
     return undefined
   }
+
+  const category = extractSpendCategory(query) ?? getRecentSpendCategory(memory)
 
   return {
     mode: 'tool_calls',
     toolCalls: [
       {
         arguments: {
-          category: extractSpendCategory(query),
+          category,
           merchantNames: null,
         },
         tool: isRefundQuestion ? 'calculateRefundTotals' : 'calculateMerchantSpend',
@@ -312,9 +627,12 @@ export async function finalizeAssistantToolResults(
           audience: 'MailBuddy portfolio demo user',
           maxSentences: 3,
           style: 'natural, concise, grounded',
+          userFacingIdentifiers:
+            'For orders, identify them by merchant and placed date. Do not include order numbers unless the user explicitly asked for an order number.',
         },
+        baselineAnswer: answer.message,
         question: query,
-        toolResults,
+        toolResults: prepareToolResultsForFinalizer(toolResults),
       }),
       headers: { 'Content-Type': 'application/json' },
       method: 'POST',
@@ -331,6 +649,31 @@ export async function finalizeAssistantToolResults(
   } catch {
     return answer
   }
+}
+
+function prepareToolResultsForFinalizer(toolResults: AssistantToolResult[]) {
+  return toolResults.map((toolResult) => ({
+    ...toolResult,
+    result: prepareResultForFinalizer(toolResult.result),
+  }))
+}
+
+function prepareResultForFinalizer(result: unknown): unknown {
+  if (Array.isArray(result)) {
+    return result.map(prepareResultForFinalizer)
+  }
+
+  if (!result || typeof result !== 'object') {
+    return result
+  }
+
+  const resultRecord = result as Record<string, unknown>
+
+  return Object.fromEntries(
+    Object.entries(resultRecord)
+      .filter(([key]) => key !== 'orderNumber')
+      .map(([key, value]) => [key, prepareResultForFinalizer(value)]),
+  )
 }
 
 export function validateAssistantToolPlan(plan: unknown): plan is AssistantToolPlan {
@@ -635,7 +978,10 @@ async function executeToolCall(
   }
 }
 
-function createAnswerFromToolResults(toolResults: AssistantToolResult[]): AssistantAnswer | undefined {
+function createAnswerFromToolResults(
+  toolResults: AssistantToolResult[],
+  query: string,
+): AssistantAnswer | undefined {
   const first = toolResults[0]
 
   if (!first) {
@@ -773,7 +1119,7 @@ function createAnswerFromToolResults(toolResults: AssistantToolResult[]): Assist
     const result = first.result as {
       orders: ReturnType<typeof compactOrder>[]
     }
-    const order = result.orders[0]
+    const order = sortCompactOrdersByMostRecent(result.orders)[0]
 
     if (!order) {
       return {
@@ -783,8 +1129,8 @@ function createAnswerFromToolResults(toolResults: AssistantToolResult[]): Assist
     }
 
     return {
-      grounding: `Order: ${order.merchantName}`,
-      message: `${order.merchantName} order is ${formatOrderStatus(order)}.`,
+      grounding: `Order: ${order.merchantName} #${order.orderNumber}`,
+      message: `${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)} is ${formatOrderStatus(order)}.`,
       type: 'answer',
     }
   }
@@ -796,27 +1142,28 @@ function createAnswerFromToolResults(toolResults: AssistantToolResult[]): Assist
       merchantNames: string[]
       totalSpend: number
     }
+    const displayCategory = getDisplaySpendCategory(query, result.category)
     return {
-      grounding: result.category
-        ? `Order totals: ${result.category} category`
+      grounding: displayCategory
+        ? `Order totals: ${displayCategory} category`
         : result.merchantNames.length
         ? `Merchant: ${result.merchantNames.join(', ')}`
         : 'Order totals',
       message:
         result.totalSpend > 0
           ? `You spent ${formatCurrency(result.totalSpend)}${
-              result.category
-                ? ` on ${result.category}`
+              displayCategory
+                ? ` on ${displayCategory}`
                 : result.merchantNames.length
                   ? ` on ${result.merchantNames.join(', ')}`
                   : ''
             } in the requested period.${
-              result.category && result.merchantNames.length
+              displayCategory && result.merchantNames.length
                 ? ` Included merchants: ${result.merchantNames.join(', ')}.`
                 : ''
             }`
           : `I didn’t find matching spend data${
-              result.category ? ` for ${result.category}` : ''
+              displayCategory ? ` for ${displayCategory}` : ''
             } in the requested period.`,
       type: result.totalSpend > 0 ? 'answer' : 'no-data',
     }
@@ -849,6 +1196,10 @@ function createAnswerFromToolResults(toolResults: AssistantToolResult[]): Assist
   }
 
   return undefined
+}
+
+function getDisplaySpendCategory(query: string, category: string | null) {
+  return extractSpendCategory(query) ?? category
 }
 
 function sanitizeArguments(args: ToolArguments) {
@@ -887,11 +1238,20 @@ function compactOrder(order: OrderUpdate) {
     finalChargedAmount: order.finalChargedAmount ?? null,
     merchantName: order.merchantName,
     orderDate: order.orderDate,
+    orderNumber: order.orderNumber,
     orderTotal: order.orderTotal ?? null,
     refundTotal: order.refundTotal ?? null,
     status: order.status,
     trackingNumber: order.trackingNumber ?? null,
   }
+}
+
+function sortCompactOrdersByMostRecent(orders: ReturnType<typeof compactOrder>[]) {
+  return [...orders].sort(
+    (firstOrder, secondOrder) =>
+      new Date(secondOrder.orderDate).getTime() -
+      new Date(firstOrder.orderDate).getTime(),
+  )
 }
 
 function getStatusArg(value: unknown): ActionItem['status'] {
@@ -1063,4 +1423,11 @@ function formatOrderStatus(order: ReturnType<typeof compactOrder>) {
   }
 
   return String(order.status).replaceAll('_', ' ')
+}
+
+function formatOrderPlacedDate(value: string) {
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(value))
 }

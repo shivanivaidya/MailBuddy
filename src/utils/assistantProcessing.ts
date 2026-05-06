@@ -25,6 +25,22 @@ type ClarificationCandidate = {
   label: string
 }
 
+export type AssistantRecentTurn = {
+  answer: string
+  domain?: AssistantDomain
+  entities: {
+    category?: string
+    conversationId?: string
+    merchantName?: string
+    orderId?: string
+    orderNumber?: string
+    personName?: string
+    subject?: string
+  }
+  query: string
+  type: AssistantAnswer['type']
+}
+
 export type AssistantContext = {
   actions: ActionItem[]
   dateRange?: AssistantDateRange
@@ -46,6 +62,7 @@ export type AssistantMemory = {
     orderNumber: string
   }
   spendContext?: {
+    category?: string
     merchantNames?: string[]
   }
   threadContext?: {
@@ -53,6 +70,7 @@ export type AssistantMemory = {
     referencedPerson?: string
     subject: string
   }
+  recentTurns?: AssistantRecentTurn[]
 }
 
 export type AssistantTurnResult = {
@@ -63,6 +81,7 @@ export type AssistantTurnResult = {
 type QueryUnderstanding = {
   domains: AssistantDomain[]
   merchantNames: string[]
+  orderDate?: string
   orderNumbers: string[]
   personName?: string
   terms: string[]
@@ -105,17 +124,28 @@ export function answerAssistantTurn(
         message: 'What would you like to check?',
         type: 'clarification',
       },
-      memory,
+      memory: recordAssistantTurn(query, {
+        message: 'What would you like to check?',
+        type: 'clarification',
+      }, memory),
     }
   }
 
   const clarificationTurn = resolveClarification(normalizedQuery, context, memory)
 
   if (clarificationTurn) {
-    return clarificationTurn
+    return {
+      ...clarificationTurn,
+      memory: recordAssistantTurn(query, clarificationTurn.answer, clarificationTurn.memory),
+    }
   }
 
-  return runBoundedAssistant(normalizedQuery, context, memory)
+  const result = runBoundedAssistant(normalizedQuery, context, memory)
+
+  return {
+    ...result,
+    memory: recordAssistantTurn(query, result.answer, result.memory),
+  }
 }
 
 export function searchQuickActions(
@@ -719,6 +749,25 @@ function answerOrderQuestion(
     )
   }
 
+  if (understanding.orderDate) {
+    orders = orders.filter((order) =>
+      order.orderDate.startsWith(understanding.orderDate ?? ''),
+    )
+  }
+
+  if (
+    !understanding.orderNumbers.length &&
+    !understanding.orderDate &&
+    memory.orderContext &&
+    isOrderDetailFollowUp(query)
+  ) {
+    orders = orders.filter((order) => order.id === memory.orderContext?.orderId)
+  }
+
+  if (understanding.merchantNames.length && !understanding.orderNumbers.length) {
+    orders = sortOrdersByMostRecent(orders)
+  }
+
   if (!orders.length) {
     return undefined
   }
@@ -751,6 +800,14 @@ function answerOrderQuestion(
       },
     }),
   }
+}
+
+function sortOrdersByMostRecent(orders: OrderUpdate[]) {
+  return [...orders].sort(
+    (firstOrder, secondOrder) =>
+      new Date(secondOrder.orderDate).getTime() -
+      new Date(firstOrder.orderDate).getTime(),
+  )
 }
 
 function answerSpendQuestion(
@@ -1181,6 +1238,7 @@ function understandQuery(
   const terms = getMeaningfulTerms(query)
   const personName = findPersonMention(query, context, memory)
   const merchantNames = extractMerchantNames(query, context.orders, memory)
+  const orderDate = extractOrderDate(query, context)
   const orderNumbers = extractOrderNumbers(query)
   const topicTerms = terms.filter((term) =>
     ![
@@ -1214,6 +1272,7 @@ function understandQuery(
   return {
     domains,
     merchantNames,
+    orderDate,
     orderNumbers,
     personName,
     terms,
@@ -1227,6 +1286,10 @@ function identifyLikelyDomains(
   memory: AssistantMemory,
 ): AssistantDomain[] {
   const domains: AssistantDomain[] = []
+
+  if (memory.orderContext && isOrderDetailFollowUp(query)) {
+    domains.push('order_updates')
+  }
 
   if (isSpendQuery(query)) {
     domains.push('spend')
@@ -1290,30 +1353,53 @@ function createOrderAnswer(query: string, order: OrderUpdate) {
       : `I didn’t find a tracking number for ${order.merchantName} order #${order.orderNumber}.`
   }
 
-  if (query.includes('refund')) {
-    return order.refundedItems?.length
-      ? `${order.merchantName} refunded ${order.refundedItems
+  if (query.includes('replaced') && query.includes('refund')) {
+    const replacements = order.replacedItems?.length
+      ? `Replacements: ${order.replacedItems
+          .map((item) => `${item.originalItem} were replaced with ${item.replacementItem}`)
+          .join(', ')}.`
+      : 'No replacements found.'
+    const refunds = order.refundedItems?.length
+      ? ` Refunds: ${order.refundedItems
           .map((item) => `${item.name} (${formatCurrency(item.amount)})`)
           .join(', ')}.`
-      : `I didn’t find any refunds for ${order.merchantName} order #${order.orderNumber}.`
+      : ' No refunds found.'
+
+    return `${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)}: ${replacements}${refunds}`
+  }
+
+  if (query.includes('refund')) {
+    return order.refundedItems?.length
+      ? `${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)} had refunds for ${order.refundedItems
+          .map((item) => `${item.name} (${formatCurrency(item.amount)})`)
+          .join(', ')}.`
+      : `I didn’t find any refunds for the ${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)}.`
   }
 
   if (query.includes('replaced')) {
     return order.replacedItems?.length
-      ? `${order.merchantName} replaced ${order.replacedItems
-          .map((item) => `${item.originalItem} with ${item.replacementItem}`)
+      ? `${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)} had replacements: ${order.replacedItems
+          .map((item) => `${item.originalItem} were replaced with ${item.replacementItem}`)
           .join(', ')}.`
-      : `I didn’t find any replacements for ${order.merchantName} order #${order.orderNumber}.`
+      : `I didn’t find any replacements for the ${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)}.`
   }
 
-  return `${order.merchantName} order #${order.orderNumber} is ${formatStatus(
+  return `${order.merchantName} order placed on ${formatOrderPlacedDate(order.orderDate)} is ${formatStatus(
     order.status,
   )}.`
+}
+
+function formatOrderPlacedDate(value: string) {
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(value))
 }
 
 function detectOutcome(thread: EmailThread, topicTerms: string[]) {
   const proposal = findProposal(thread, topicTerms)
   const decision = findDecisionText(thread, topicTerms)
+  const pendingAsk = findPendingAsk(thread, topicTerms)
 
   if (decision) {
     return decision
@@ -1321,6 +1407,10 @@ function detectOutcome(thread: EmailThread, topicTerms: string[]) {
 
   if (proposal) {
     return `${proposal} It still needs confirmation.`
+  }
+
+  if (pendingAsk) {
+    return `It still needs confirmation. ${pendingAsk}`
   }
 
   return 'It looks like the decision is still in progress.'
@@ -1369,6 +1459,7 @@ function findRelevantInboundFromPerson(
 }
 
 function findDecisionText(thread: EmailThread, topicTerms: string[]) {
+  const expandedTopicTerms = expandTopicTerms(topicTerms)
   const decisionSignals = [
     /(?:let us|let's)\s+go with\s+([^.!?]+)/i,
     /(?:we decided|decided|agreed|confirmed|finalized|finalised|booked)\s+([^.!?]+)/i,
@@ -1380,11 +1471,7 @@ function findDecisionText(thread: EmailThread, topicTerms: string[]) {
   ]
 
   for (const candidate of candidates) {
-    if (
-      topicTerms.length &&
-      scoreText(candidate, topicTerms) === 0 &&
-      !decisionSignals.some((signal) => signal.test(candidate))
-    ) {
+    if (expandedTopicTerms.length && scoreText(candidate, expandedTopicTerms) === 0) {
       continue
     }
 
@@ -1399,6 +1486,7 @@ function findDecisionText(thread: EmailThread, topicTerms: string[]) {
 }
 
 function findProposal(thread: EmailThread, topicTerms: string[]) {
+  const expandedTopicTerms = expandTopicTerms(topicTerms)
   const proposalPatterns = [
     /(?:they can hold|can hold)\s+([^.!?]+)/i,
     /([^.!?]+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)[^.!?]*)/i,
@@ -1411,7 +1499,7 @@ function findProposal(thread: EmailThread, topicTerms: string[]) {
   ]
 
   for (const candidate of candidates) {
-    if (topicTerms.length && scoreText(candidate, topicTerms) === 0) {
+    if (expandedTopicTerms.length && scoreText(candidate, expandedTopicTerms) === 0) {
       continue
     }
 
@@ -1426,7 +1514,7 @@ function findProposal(thread: EmailThread, topicTerms: string[]) {
   return undefined
 }
 
-function findPendingAsk(thread: EmailThread) {
+function findPendingAsk(thread: EmailThread, topicTerms: string[] = []) {
   const latestSent = [...thread.emails]
     .reverse()
     .find((email) => email.direction === 'sent')
@@ -1435,16 +1523,34 @@ function findPendingAsk(thread: EmailThread) {
     return undefined
   }
 
-  const askMatch = latestSent.body.match(
-    /(?:can|could|please)\s+(.+?)(?:\?|$)/i,
-  )
+  const questionClauses = latestSent.body.includes('?')
+    ? latestSent.body
+        .split('?')
+        .map((clause) => clause.trim())
+        .filter(Boolean)
+        .map((clause) => `${clause.split(/[.!]\s+/).pop() ?? clause}?`)
+    : [latestSent.body]
+  const expandedTopicTerms = expandTopicTerms(topicTerms)
+  const askMatches = questionClauses.flatMap((clause) => {
+    const askMatch = clause.match(/(?:can|could|please)\s+(.+?)(?:\?|$)/i)
 
-  if (!askMatch) {
+    return askMatch ? [{ ask: askMatch[1].trim(), clause }] : []
+  })
+  const selectedAsk = expandedTopicTerms.length
+    ? askMatches.find(({ clause }) => scoreText(clause, expandedTopicTerms) > 0)
+    : askMatches[0]
+
+  if (!selectedAsk) {
     return undefined
   }
 
   const recipient = formatName(latestSent.recipients?.[0] ?? 'the recipient')
-  const ask = askMatch[1].trim().replace(/^you\s+/i, '')
+  const ask = selectedAsk.ask.replace(/^you\s+/i, '')
+
+  if (/^someone\s+/i.test(ask)) {
+    return `${ask.charAt(0).toUpperCase()}${ask.slice(1)}.`
+  }
+
   return `${recipient} needs to ${ask}.`
 }
 
@@ -1592,11 +1698,45 @@ function extractMerchantNames(
       .map((order) => order.merchantName),
   )
 
-  if (!merchants.length && query.includes('it') && memory.orderContext) {
+  if (!merchants.length && /\b(it|that|this|one)\b/.test(query) && memory.orderContext) {
     return [memory.orderContext.merchantName]
   }
 
   return merchants
+}
+
+function extractOrderDate(query: string, context: AssistantContext) {
+  const normalizedQuery = normalize(query)
+  const monthMatch = normalizedQuery.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(20\d{2}))?\b/,
+  )
+
+  if (!monthMatch) {
+    return undefined
+  }
+
+  const monthIndex = [
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+  ].indexOf(monthMatch[1])
+  const day = Number(monthMatch[2])
+  const year = monthMatch[3] ?? getLatestOrderDate(context.orders)?.slice(0, 4)
+
+  if (monthIndex < 0 || !day || !year) {
+    return undefined
+  }
+
+  return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 function extractOrderNumbers(query: string) {
@@ -1674,7 +1814,7 @@ function getMeaningfulTerms(query: string) {
 function expandTopicTerms(topicTerms: string[]) {
   const expansions: Record<string, string[]> = {
     restaurant: ['restaurant', 'reservation', 'dinner', 'table'],
-    outing: ['outing', 'dinner', 'reservation'],
+    outing: ['outing'],
   }
 
   return dedupe(topicTerms.flatMap((term) => expansions[term] ?? [term]))
@@ -1719,6 +1859,10 @@ function getOrderSearchText(order: OrderUpdate, context: AssistantContext) {
 
 function isSpendQuery(query: string) {
   return /\bspend|spent|cost|total|how much|refund total\b/.test(query)
+}
+
+function isOrderDetailFollowUp(query: string) {
+  return /\b(refund|refunded|replaced|replacement|tracking|delivered|delivery|shipped|shipping|pickup|anything)\b/.test(query)
 }
 
 function getPriorityMention(query: string): ActionItem['priority'] | undefined {
@@ -1876,8 +2020,46 @@ function remember(
   return {
     lastSuccessfulDomain: domain ?? memory.lastSuccessfulDomain,
     orderContext: nextMemory.orderContext ?? memory.orderContext,
+    recentTurns: nextMemory.recentTurns ?? memory.recentTurns,
     spendContext: nextMemory.spendContext ?? memory.spendContext,
     threadContext: nextMemory.threadContext ?? memory.threadContext,
+  }
+}
+
+export function recordAssistantTurn(
+  query: string,
+  answer: AssistantAnswer,
+  memory: AssistantMemory,
+): AssistantMemory {
+  const trimmedQuery = query.trim()
+
+  if (!trimmedQuery) {
+    return memory
+  }
+
+  const recentTurn: AssistantRecentTurn = {
+    answer: answer.message,
+    domain: answer.type === 'answer' ? memory.lastSuccessfulDomain : undefined,
+    entities: {
+      category: memory.spendContext?.category,
+      conversationId: memory.threadContext?.conversationId,
+      merchantName: memory.orderContext?.merchantName,
+      orderId: memory.orderContext?.orderId,
+      orderNumber: memory.orderContext?.orderNumber,
+      personName: memory.threadContext?.referencedPerson,
+      subject: memory.threadContext?.subject,
+    },
+    query: trimmedQuery,
+    type: answer.type,
+  }
+  const recentTurns = [
+    ...(memory.recentTurns ?? []).filter((turn) => turn.query !== trimmedQuery),
+    recentTurn,
+  ].slice(-5)
+
+  return {
+    ...memory,
+    recentTurns,
   }
 }
 
