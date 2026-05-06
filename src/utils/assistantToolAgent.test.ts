@@ -508,6 +508,28 @@ describe('answerAssistantWithToolPlanning', () => {
     })
   })
 
+  it('answers task due-date questions when the planner asks an unnecessary clarification', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'When is the permission slip due?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerFetch({
+          clarificationQuestion:
+            'Do you mean a specific permission slip?',
+          mode: 'clarification',
+          toolCalls: [],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Task: Sign and return permission slip',
+      message: 'Sign and return permission slip is due friday.',
+      type: 'answer',
+    })
+  })
+
   it('executes a planned conversation decision lookup for finalization', async () => {
     const result = await answerAssistantWithToolPlanning(
       'Have we finalized the restaurant for the team outing?',

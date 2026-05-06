@@ -171,10 +171,11 @@ export async function answerAssistantWithToolPlanning(
     }
 
     if (plan.mode === 'clarification') {
-      const spendPlan = createSpendPlanFromQuestion(query)
+      const localPlan =
+        createQuickActionPlanFromQuestion(query) ?? createSpendPlanFromQuestion(query)
 
-      if (spendPlan) {
-        const toolResults = await executeAssistantToolPlan(spendPlan, context, options)
+      if (localPlan) {
+        const toolResults = await executeAssistantToolPlan(localPlan, context, options)
         const answer = createAnswerFromToolResults(toolResults)
 
         if (answer) {
@@ -214,6 +215,41 @@ export async function answerAssistantWithToolPlanning(
   } catch {
     return fallback
   }
+}
+
+function createQuickActionPlanFromQuestion(
+  query: string,
+): AssistantToolPlan | undefined {
+  if (
+    !/\b(task|quick action|todo|to do|due|deadline|permission slip|form|renew|submit|sign|return|need to do)\b/i.test(
+      query,
+    )
+  ) {
+    return undefined
+  }
+
+  return {
+    mode: 'tool_calls',
+    toolCalls: [
+      {
+        arguments: {
+          query: extractQuickActionQuery(query),
+        },
+        tool: 'searchQuickActions',
+      },
+    ],
+  }
+}
+
+function extractQuickActionQuery(query: string) {
+  return query
+    .replace(/[?.!]+$/g, '')
+    .replace(
+      /\b(?:when|what|is|are|the|my|a|an|do|does|did|i|need|to|know|due|date|for)\b/gi,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim() || query
 }
 
 function createSpendPlanFromQuestion(query: string): AssistantToolPlan | undefined {
