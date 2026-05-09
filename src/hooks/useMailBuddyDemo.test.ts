@@ -1,6 +1,22 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useMailBuddyDemo } from '@/hooks/useMailBuddyDemo'
+import type { ActionItem } from '@/types/mail'
+
+const priorityRank: Record<ActionItem['priority'], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+}
+
+function expectPrioritySorted(priorities: Array<ActionItem['priority']>) {
+  expect(priorities).toEqual(
+    [...priorities].sort(
+      (firstPriority, secondPriority) =>
+        priorityRank[firstPriority] - priorityRank[secondPriority],
+    ),
+  )
+}
 
 describe('useMailBuddyDemo state transitions', () => {
   it('uses one date range to filter quick actions, conversations, and updates', () => {
@@ -28,6 +44,17 @@ describe('useMailBuddyDemo state transitions', () => {
       'Etsy',
       'Thai Garden',
     ])
+  })
+
+  it('sorts visible quick actions and conversations by highest priority first', () => {
+    const { result } = renderHook(() => useMailBuddyDemo())
+
+    expectPrioritySorted(
+      result.current.filteredActions.map((action) => action.priority),
+    )
+    expectPrioritySorted(
+      result.current.filteredThreads.map((thread) => thread.priority),
+    )
   })
 
   it('handles invalid date ranges by clamping the changed boundary safely', () => {
@@ -101,6 +128,28 @@ describe('useMailBuddyDemo state transitions', () => {
     expect(result.current.filteredActions.map((action) => action.id)).toContain(
       actionId,
     )
+  })
+
+  it('edits conversation title, priority, and due date locally', () => {
+    const { result } = renderHook(() => useMailBuddyDemo())
+    const conversationId = 'thread_team-retreat-agenda'
+
+    act(() => {
+      result.current.editThread(conversationId, {
+        dueDate: 'next friday',
+        priority: 'high',
+        subject: 'Updated retreat agenda',
+      })
+    })
+
+    expect(
+      result.current.threads.find((thread) => thread.id === conversationId),
+    ).toMatchObject({
+      dueDate: 'next friday',
+      dueDateSource: 'user',
+      priority: 'high',
+      subject: 'Updated retreat agenda',
+    })
   })
 
   it('marks a conversation reviewed and can restore it', () => {

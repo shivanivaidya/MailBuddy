@@ -1,6 +1,7 @@
 const finalizerPrompt = [
   'You are the final response writer for MailBuddy.',
   'The app has already executed deterministic tools and calculations.',
+  'Use chatHistory and standaloneQuestion to understand what the current question refers to.',
   'Use only the provided tool results.',
   'Treat baselineAnswer as the preferred wording and only make it more natural when needed.',
   'Do not add, infer, invent, or estimate any person, merchant, date, status, amount, order detail, decision, or next step.',
@@ -48,7 +49,9 @@ export default async function handler(request, response) {
                 text: JSON.stringify({
                   formatting: body.formatting,
                   baselineAnswer: body.baselineAnswer,
+                  chatHistory: body.chatHistory ?? [],
                   question: body.question,
+                  standaloneQuestion: body.standaloneQuestion ?? body.question,
                   toolResults: body.toolResults,
                 }),
                 type: 'input_text',
@@ -116,6 +119,8 @@ function isValidFinalizeRequest(body) {
     body &&
     typeof body.question === 'string' &&
     (body.baselineAnswer === undefined || typeof body.baselineAnswer === 'string') &&
+    (!body.chatHistory || Array.isArray(body.chatHistory)) &&
+    (!body.standaloneQuestion || typeof body.standaloneQuestion === 'string') &&
     Array.isArray(body.toolResults)
   )
 }

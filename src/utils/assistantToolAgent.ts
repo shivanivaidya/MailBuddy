@@ -18,6 +18,7 @@ import {
   searchQuickActions,
   trackResponseFromPerson,
   recordAssistantTurn,
+  type AssistantChatHistoryTurn,
   type AssistantContext,
   type AssistantDateRange,
   type AssistantMemory,
@@ -50,6 +51,7 @@ export type AssistantToolPlan = {
   clarificationQuestion?: string
   fallbackReason?: string
   mode: 'tool_calls' | 'clarification' | 'unsupported'
+  standaloneQuestion?: string | null
   toolCalls: AssistantToolCall[]
 }
 
@@ -73,11 +75,14 @@ export type AssistantToolResult = {
 }
 
 type ToolAgentResult = AssistantTurnResult & {
+  standaloneQuestion?: string
   toolResults?: AssistantToolResult[]
 }
 
 type ToolAgentOptions = {
+  chatHistory?: AssistantChatHistoryTurn[]
   fetcher?: typeof fetch
+  standaloneQuestion?: string
 }
 
 type SpendClassification = {
@@ -93,12 +98,14 @@ function createToolAgentResult(
   memory: AssistantMemory,
   toolResults: AssistantToolResult[],
   query: string,
+  effectiveQuery = query,
 ): ToolAgentResult {
-  const nextMemory = rememberToolResultContext(memory, toolResults, query)
+  const nextMemory = rememberToolResultContext(memory, toolResults, effectiveQuery)
 
   return {
     answer,
     memory: recordAssistantTurn(query, answer, nextMemory),
+    standaloneQuestion: effectiveQuery === query ? undefined : effectiveQuery,
     toolResults,
   }
 }
@@ -141,6 +148,10 @@ function getRecentSpendCategory(memory: AssistantMemory) {
       .reverse()
       .find((turn) => turn.domain === 'spend' && turn.entities.category)
       ?.entities.category
+}
+
+function getRecentSpendMerchantNames(memory: AssistantMemory) {
+  return memory.spendContext?.merchantNames ?? []
 }
 
 const supportedTools: AssistantToolName[] = [
@@ -234,20 +245,30 @@ export async function answerAssistantWithToolPlanning(
 ): Promise<ToolAgentResult> {
   const fallback = answerAssistantTurn(query, context, memory)
 
+  if (isTodayTaskSummaryQuery(query) && fallback.answer.type === 'answer') {
+    return fallback
+  }
+
+  if (isOrderStatusQuestion(query) && fallback.answer.type === 'answer') {
+    return fallback
+  }
+
   if (isOrderFollowUp(query, memory) && fallback.answer.type === 'answer') {
     return fallback
   }
 
   try {
-    const plan = await requestAssistantPlan(query, context.dateRange, options)
+    const plan = await requestAssistantPlan(query, context, options)
     if (!validateAssistantToolPlan(plan)) {
       return fallback
     }
+    const effectiveQuery = getStandaloneQuestion(plan, query)
+    const effectiveContext = getContextForQuestion(effectiveQuery, context)
 
     if (plan.mode === 'clarification') {
       const conversationResult = await answerConversationQuestionWithLlm(
-        query,
-        context,
+        effectiveQuery,
+        effectiveContext,
         fallback.memory,
         options,
       )
@@ -256,20 +277,29 @@ export async function answerAssistantWithToolPlanning(
         return conversationResult
       }
 
-      if (fallback.answer.type === 'answer') {
-        return fallback
-      }
-
       const localPlan =
-        createQuickActionPlanFromQuestion(query) ?? createSpendPlanFromQuestion(query, fallback.memory)
+        createQuickActionPlanFromQuestion(effectiveQuery) ??
+        createSpendPlanFromQuestion(effectiveQuery, memory)
 
       if (localPlan) {
-        const toolResults = await executeAssistantToolPlan(localPlan, context, options)
-        const answer = createAnswerFromToolResults(toolResults, query)
+        const toolResults = await executeAssistantToolPlan(
+          localPlan,
+          effectiveContext,
+          options,
+        )
+        const answer = createAnswerFromToolResults(
+          toolResults,
+          effectiveQuery,
+          effectiveContext,
+        )
 
         if (answer) {
-          return createToolAgentResult(answer, fallback.memory, toolResults, query)
+          return createToolAgentResult(answer, memory, toolResults, query, effectiveQuery)
         }
+      }
+
+      if (fallback.answer.type === 'answer') {
+        return fallback
       }
 
       return {
@@ -288,10 +318,10 @@ export async function answerAssistantWithToolPlanning(
       return fallback
     }
 
-    if (shouldUseConversationAnswer(query, plan)) {
+    if (shouldUseConversationAnswer(effectiveQuery, plan)) {
       const conversationResult = await answerConversationQuestionWithLlm(
-        query,
-        context,
+        effectiveQuery,
+        effectiveContext,
         fallback.memory,
         options,
       )
@@ -301,14 +331,18 @@ export async function answerAssistantWithToolPlanning(
       }
     }
 
-    const toolResults = await executeAssistantToolPlan(plan, context, options)
-    const answer = createAnswerFromToolResults(toolResults, query)
+    const toolResults = await executeAssistantToolPlan(
+      applySpendMemoryToPlan(plan, memory),
+      effectiveContext,
+      options,
+    )
+    const answer = createAnswerFromToolResults(toolResults, effectiveQuery, effectiveContext)
 
     if (!answer) {
       return fallback
     }
 
-    return createToolAgentResult(answer, fallback.memory, toolResults, query)
+    return createToolAgentResult(answer, fallback.memory, toolResults, query, effectiveQuery)
   } catch {
     return fallback
   }
@@ -320,6 +354,62 @@ function isOrderFollowUp(query: string, memory: AssistantMemory) {
   }
 
   return /\b(it|that|this|one)\b|\bplaced\s+on\b|\b(refund|refunded|replaced|replacement|tracking|delivered|delivery|shipped|shipping|pickup|anything)\b/i.test(query)
+}
+
+function isOrderStatusQuestion(query: string) {
+  return /\border|delivery|delivered|shipped|shipping|tracking|pickup\b/i.test(query) &&
+    !/\bspend|spent|cost|paid|total|refund total|how much\b/i.test(query)
+}
+
+function isTodayTaskSummaryQuery(query: string) {
+  return /\b(today|to do|need to do|tasks?|quick actions?)\b/i.test(query) &&
+    /\b(today|to do|need to do)\b/i.test(query) &&
+    !/\b(order|spend|spent|refund|delivered|delivery|conversation|thread|reply|respond)\b/i.test(query)
+}
+
+function getStandaloneQuestion(plan: AssistantToolPlan, fallbackQuestion: string) {
+  const standaloneQuestion = plan.standaloneQuestion?.trim()
+
+  return standaloneQuestion || fallbackQuestion
+}
+
+function getContextForQuestion(
+  query: string,
+  context: AssistantContext,
+): AssistantContext {
+  const dateRange = getToolDateRange(query, context)
+
+  return dateRange ? { ...context, dateRange } : context
+}
+
+function getToolDateRange(
+  query: string,
+  context: AssistantContext,
+): AssistantDateRange | undefined {
+  const normalizedQuery = query.toLowerCase()
+  const anchorDate = getContextAnchorDate(context)
+  const explicitMonthRange = getExplicitMonthDateRange(normalizedQuery, anchorDate)
+
+  if (explicitMonthRange) {
+    return explicitMonthRange
+  }
+
+  if (normalizedQuery.includes('this month')) {
+    return getMonthDateRange(anchorDate)
+  }
+
+  if (normalizedQuery.includes('last month')) {
+    return getPreviousMonthDateRange(anchorDate)
+  }
+
+  if (normalizedQuery.includes('today') && anchorDate) {
+    return {
+      endDate: anchorDate,
+      startDate: anchorDate,
+    }
+  }
+
+  return undefined
 }
 
 async function answerConversationQuestionWithLlm(
@@ -563,6 +653,7 @@ function createSpendPlanFromQuestion(
   memory: AssistantMemory = {},
 ): AssistantToolPlan | undefined {
   const normalizedQuery = query.toLowerCase()
+  const recentSpendMerchantNames = getRecentSpendMerchantNames(memory)
   const isRefundQuestion = /\brefund|refunded|reimburse|reimbursed\b/.test(
     normalizedQuery,
   )
@@ -571,7 +662,7 @@ function createSpendPlanFromQuestion(
     /\bspend|spent|buy|bought|purchase|purchased|order|orders|paid\b/.test(
       normalizedQuery,
     ) ||
-    (Boolean(getRecentSpendCategory(memory)) &&
+    ((Boolean(getRecentSpendCategory(memory)) || recentSpendMerchantNames.length > 0) &&
       /\b(last|this|next)\s+(week|month|year)\b|\b(today|yesterday|tomorrow)\b/.test(
         normalizedQuery,
       ))
@@ -581,6 +672,7 @@ function createSpendPlanFromQuestion(
   }
 
   const category = extractSpendCategory(query) ?? getRecentSpendCategory(memory)
+  const merchantNames = category ? null : recentSpendMerchantNames
 
   return {
     mode: 'tool_calls',
@@ -588,11 +680,51 @@ function createSpendPlanFromQuestion(
       {
         arguments: {
           category,
-          merchantNames: null,
+          merchantNames,
         },
         tool: isRefundQuestion ? 'calculateRefundTotals' : 'calculateMerchantSpend',
       },
     ],
+  }
+}
+
+function applySpendMemoryToPlan(
+  plan: AssistantToolPlan,
+  memory: AssistantMemory,
+): AssistantToolPlan {
+  const merchantNames = getRecentSpendMerchantNames(memory)
+  const category = getRecentSpendCategory(memory)
+
+  if (!merchantNames.length && !category) {
+    return plan
+  }
+
+  return {
+    ...plan,
+    toolCalls: plan.toolCalls.map((call) => {
+      if (
+        call.tool !== 'calculateMerchantSpend' &&
+        call.tool !== 'calculateRefundTotals'
+      ) {
+        return call
+      }
+
+      const hasCategory = hasArgument(call.arguments.category)
+      const hasMerchantNames = hasArgument(call.arguments.merchantNames)
+
+      if (hasCategory || hasMerchantNames) {
+        return call
+      }
+
+      return {
+        ...call,
+        arguments: {
+          ...call.arguments,
+          category: category ?? null,
+          merchantNames: category ? null : merchantNames,
+        },
+      }
+    }),
   }
 }
 
@@ -631,7 +763,9 @@ export async function finalizeAssistantToolResults(
             'For orders, identify them by merchant and placed date. Do not include order numbers unless the user explicitly asked for an order number.',
         },
         baselineAnswer: answer.message,
+        chatHistory: options.chatHistory ?? [],
         question: query,
+        standaloneQuestion: options.standaloneQuestion ?? query,
         toolResults: prepareToolResultsForFinalizer(toolResults),
       }),
       headers: { 'Content-Type': 'application/json' },
@@ -721,14 +855,18 @@ export function executeAssistantToolPlan(
 
 async function requestAssistantPlan(
   query: string,
-  dateRange: AssistantDateRange | undefined,
+  context: AssistantContext,
   options: ToolAgentOptions,
 ) {
   const fetcher = options.fetcher ?? fetch
   const response = await fetcher('/api/assistant/plan', {
     body: JSON.stringify({
-      dateRange,
+      chatHistory: options.chatHistory ?? [],
+      dateRange: context.dateRange,
       question: query,
+      temporalContext: {
+        anchorDate: getContextAnchorDate(context),
+      },
       tools: assistantToolSchemas,
     }),
     headers: { 'Content-Type': 'application/json' },
@@ -981,6 +1119,7 @@ async function executeToolCall(
 function createAnswerFromToolResults(
   toolResults: AssistantToolResult[],
   query: string,
+  context: AssistantContext,
 ): AssistantAnswer | undefined {
   const first = toolResults[0]
 
@@ -1143,6 +1282,7 @@ function createAnswerFromToolResults(
       totalSpend: number
     }
     const displayCategory = getDisplaySpendCategory(query, result.category)
+    const rangeLabel = getToolSpendRangeLabel(query, context.dateRange)
     return {
       grounding: displayCategory
         ? `Order totals: ${displayCategory} category`
@@ -1157,14 +1297,14 @@ function createAnswerFromToolResults(
                 : result.merchantNames.length
                   ? ` on ${result.merchantNames.join(', ')}`
                   : ''
-            } in the requested period.${
+            } ${rangeLabel}.${
               displayCategory && result.merchantNames.length
                 ? ` Included merchants: ${result.merchantNames.join(', ')}.`
                 : ''
             }`
           : `I didn’t find matching spend data${
               displayCategory ? ` for ${displayCategory}` : ''
-            } in the requested period.`,
+            } ${rangeLabel}.`,
       type: result.totalSpend > 0 ? 'answer' : 'no-data',
     }
   }
@@ -1186,7 +1326,7 @@ function createAnswerFromToolResults(
           : result.merchantNames.length
             ? ` from ${result.merchantNames.join(', ')}`
             : ''
-      } in the selected date range.${
+      } ${getToolSpendRangeLabel(query, context.dateRange)}.${
         result.category && result.merchantNames.length
           ? ` Included merchants: ${result.merchantNames.join(', ')}.`
           : ''
@@ -1199,7 +1339,7 @@ function createAnswerFromToolResults(
 }
 
 function getDisplaySpendCategory(query: string, category: string | null) {
-  return extractSpendCategory(query) ?? category
+  return category ? extractSpendCategory(query) ?? category : undefined
 }
 
 function sanitizeArguments(args: ToolArguments) {
@@ -1430,4 +1570,104 @@ function formatOrderPlacedDate(value: string) {
     dateStyle: 'long',
     timeZone: 'UTC',
   }).format(new Date(value))
+}
+
+function getToolSpendRangeLabel(
+  query: string,
+  dateRange: AssistantDateRange | undefined,
+) {
+  const normalizedQuery = query.toLowerCase()
+  const explicitMonthRange = getExplicitMonthDateRange(
+    normalizedQuery,
+    dateRange?.endDate ?? null,
+  )
+
+  if (explicitMonthRange) {
+    return `in ${formatMonthName(explicitMonthRange.startDate)}`
+  }
+
+  if (normalizedQuery.includes('this month')) {
+    return 'this month'
+  }
+
+  if (normalizedQuery.includes('last month') && dateRange) {
+    return `in ${formatMonthName(dateRange.startDate)}`
+  }
+
+  return 'in the requested period'
+}
+
+function formatMonthName(value: string) {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' })
+    .format(new Date(`${value}T00:00:00.000Z`))
+}
+
+function getContextAnchorDate(context: AssistantContext) {
+  const latestOrderDate = context.orders
+    .map((order) => order.orderDate)
+    .filter(Boolean)
+    .sort((firstDate, secondDate) => secondDate.localeCompare(firstDate))[0] ?? null
+
+  return latestOrderDate?.slice(0, 10) ?? context.dateRange?.endDate ?? null
+}
+
+function getExplicitMonthDateRange(
+  query: string,
+  anchorDate: string | null,
+): AssistantDateRange | undefined {
+  const monthMatch = query.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i,
+  )
+
+  if (!monthMatch) {
+    return undefined
+  }
+
+  const monthIndex = [
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+  ].indexOf(monthMatch[1].toLowerCase())
+  const year = monthMatch[2] ?? anchorDate?.slice(0, 4)
+
+  if (monthIndex < 0 || !year) {
+    return undefined
+  }
+
+  return getMonthDateRange(`${year}-${String(monthIndex + 1).padStart(2, '0')}-01`)
+}
+
+function getMonthDateRange(value: string | null): AssistantDateRange | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const month = value.slice(0, 7)
+  const [year, monthIndex] = month.split('-').map(Number)
+  const lastDay = new Date(year, monthIndex, 0).getDate()
+
+  return {
+    endDate: `${month}-${String(lastDay).padStart(2, '0')}`,
+    startDate: `${month}-01`,
+  }
+}
+
+function getPreviousMonthDateRange(value: string | null) {
+  if (!value) {
+    return undefined
+  }
+
+  const [year, monthIndex] = value.slice(0, 7).split('-').map(Number)
+  const previousMonthDate = new Date(Date.UTC(year, monthIndex - 2, 1))
+
+  return getMonthDateRange(previousMonthDate.toISOString().slice(0, 10))
 }

@@ -488,8 +488,8 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: clothes category',
         message:
-          'You spent $79.90 on clothes in the requested period. Included merchants: Gap.',
-        type: 'answer',
+          'I didn’t find matching spend data for clothes this month.',
+        type: 'no-data',
       },
     })
 
@@ -514,8 +514,8 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: beauty category',
         message:
-          'You spent $115.07 on beauty in the requested period. Included merchants: Sephora, Ulta Beauty.',
-        type: 'answer',
+          'I didn’t find matching spend data for beauty this month.',
+        type: 'no-data',
       },
     })
 
@@ -540,8 +540,8 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: beauty and skin care category',
         message:
-          'You spent $115.07 on beauty and skin care in the requested period. Included merchants: Sephora, Ulta Beauty.',
-        type: 'answer',
+          'I didn’t find matching spend data for beauty and skin care this month.',
+        type: 'no-data',
       },
     })
 
@@ -566,8 +566,8 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: makeup category',
         message:
-          'You spent $115.07 on makeup in the requested period. Included merchants: Sephora, Ulta Beauty.',
-        type: 'answer',
+          'I didn’t find matching spend data for makeup this month.',
+        type: 'no-data',
       },
     })
 
@@ -592,8 +592,8 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: sports category',
         message:
-          'You spent $29.34 on sports in the requested period. Included merchants: Target.',
-        type: 'answer',
+          'I didn’t find matching spend data for sports this month.',
+        type: 'no-data',
       },
     })
   })
@@ -621,9 +621,9 @@ describe('answerAssistantWithToolPlanning', () => {
     )
 
     expect(result.answer).toMatchObject({
-      grounding: 'Order totals: makeup category',
-      message:
-        'I didn’t find matching spend data for makeup in the requested period.',
+        grounding: 'Order totals: makeup category',
+        message:
+          'I didn’t find matching spend data for makeup this month.',
       type: 'no-data',
     })
 
@@ -652,7 +652,7 @@ describe('answerAssistantWithToolPlanning', () => {
       answer: {
         grounding: 'Order totals: makeup category',
         message:
-          'You spent $115.07 on makeup in the requested period. Included merchants: Sephora, Ulta Beauty.',
+          'You spent $115.07 on makeup in April. Included merchants: Sephora, Ulta Beauty.',
         type: 'answer',
       },
     })
@@ -662,6 +662,155 @@ describe('answerAssistantWithToolPlanning', () => {
         category: 'makeup',
       },
       query: 'How about last month?',
+      type: 'answer',
+    })
+  })
+
+  it('keeps merchant spend context for relative follow-up questions', async () => {
+    const mayContext = {
+      ...createContext(),
+      dateRange: {
+        endDate: '2026-05-31',
+        startDate: '2026-05-01',
+      },
+    }
+    const currentMonthResult = await answerAssistantWithToolPlanning(
+      'How much did I spend on Whole Foods this month?',
+      mayContext,
+      {},
+      {
+        fetcher: createPlannerFetch({
+          mode: 'tool_calls',
+          toolCalls: [
+            {
+              arguments: {
+                merchantNames: ['Whole Foods Market'],
+              },
+              tool: 'calculateMerchantSpend',
+            },
+          ],
+        }),
+      },
+    )
+    const aprilContext = {
+      ...createContext(),
+      dateRange: {
+        endDate: '2026-04-30',
+        startDate: '2026-04-01',
+      },
+    }
+    const followUpResult = await answerAssistantWithToolPlanning(
+      'What about last month?',
+      aprilContext,
+      currentMonthResult.memory,
+      {
+        fetcher: createPlannerAndClassifierFetch({
+          clarificationQuestion:
+            'Are you asking about quick actions, conversations, order updates, or spend for last month?',
+          mode: 'clarification',
+          toolCalls: [],
+        }),
+      },
+    )
+
+    expect(followUpResult.answer).toMatchObject({
+      grounding: 'Merchant: Whole Foods Market',
+      message:
+        'You spent $86.42 on Whole Foods Market in April.',
+      type: 'answer',
+    })
+  })
+
+  it('keeps explicit order status questions on order tools when planner picks spend', async () => {
+    const result = await answerAssistantWithToolPlanning(
+      'Was my Whole Foods order delivered?',
+      createContext(),
+      {},
+      {
+        fetcher: createPlannerAndClassifierFetch({
+          mode: 'tool_calls',
+          standaloneQuestion: 'Was my Whole Foods order delivered?',
+          toolCalls: [
+            {
+              arguments: {
+                category: null,
+                merchantNames: ['Whole Foods Market'],
+              },
+              tool: 'calculateMerchantSpend',
+            },
+          ],
+        }),
+      },
+    )
+
+    expect(result.answer).toMatchObject({
+      grounding: 'Order: Whole Foods Market #WF-20491',
+      message:
+        'Whole Foods Market order placed on May 1, 2026 is out for delivery.',
+      type: 'answer',
+    })
+    expect(result.toolResults).toBeUndefined()
+  })
+
+  it('sends chat history to the planner and runs tools against the standalone rewrite', async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          plan: {
+            mode: 'tool_calls',
+            standaloneQuestion:
+              'How much did I spend on Whole Foods Market in April 2026?',
+            toolCalls: [
+              {
+                arguments: {
+                  merchantNames: ['Whole Foods Market'],
+                },
+                tool: 'calculateMerchantSpend',
+              },
+            ],
+          },
+        }),
+      ok: true,
+    })
+    const result = await answerAssistantWithToolPlanning(
+      'What about last month?',
+      {
+        ...createContext(),
+        dateRange: {
+          endDate: '2026-05-31',
+          startDate: '2026-05-01',
+        },
+      },
+      {},
+      {
+        chatHistory: [
+          {
+            answer: 'You spent $42.15 on Whole Foods Market this month.',
+            domain: 'spend',
+            entities: { merchantName: 'Whole Foods Market' },
+            question: 'How much did I spend on Whole Foods this month?',
+            type: 'answer',
+          },
+        ],
+        fetcher,
+      },
+    )
+    const requestBody = JSON.parse(fetcher.mock.calls[0][1].body as string)
+
+    expect(requestBody.chatHistory).toEqual([
+      expect.objectContaining({
+        question: 'How much did I spend on Whole Foods this month?',
+      }),
+    ])
+    expect(requestBody.temporalContext).toMatchObject({
+      anchorDate: '2026-05-01',
+    })
+    expect(result.standaloneQuestion).toBe(
+      'How much did I spend on Whole Foods Market in April 2026?',
+    )
+    expect(result.answer).toMatchObject({
+      grounding: 'Merchant: Whole Foods Market',
+      message: 'You spent $86.42 on Whole Foods Market in April.',
       type: 'answer',
     })
   })
@@ -856,7 +1005,19 @@ describe('finalizeAssistantToolResults', () => {
           tool: 'listQuickActions',
         },
       ],
-      { fetcher },
+      {
+        chatHistory: [
+          {
+            answer: 'You asked about high priority tasks.',
+            domain: 'quick_actions',
+            entities: {},
+            question: 'What is urgent?',
+            type: 'answer',
+          },
+        ],
+        fetcher,
+        standaloneQuestion: 'How many suggested medium priority quick actions are there?',
+      },
     )
 
     const requestBody = JSON.parse(fetcher.mock.calls[0][1].body as string)
@@ -864,7 +1025,13 @@ describe('finalizeAssistantToolResults', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/assistant/finalize', expect.any(Object))
     expect(requestBody).toMatchObject({
       baselineAnswer: 'You have 3 medium priority tasks.',
+      chatHistory: [
+        expect.objectContaining({
+          question: 'What is urgent?',
+        }),
+      ],
       question: 'How many medium priority quick actions are there?',
+      standaloneQuestion: 'How many suggested medium priority quick actions are there?',
       toolResults: [
         {
           result: { count: 3 },

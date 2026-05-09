@@ -1,12 +1,17 @@
 const plannerPrompt = [
   'You are the tool planner for MailBuddy.',
-  'Read the user question and choose deterministic MailBuddy tools to execute.',
+  'Read the chat history and current user question, then choose deterministic MailBuddy tools to execute.',
+  'First rewrite the current question into a standaloneQuestion that preserves conversational context from chatHistory.',
+  'Resolve follow-ups like "what about last month", "the other one", "same merchant", and pronouns using chatHistory when possible.',
+  'Use temporalContext.anchorDate and dateRange to resolve relative dates such as today, this month, and last month.',
+  'If no rewrite is needed, standaloneQuestion should equal the user question.',
   'Do not answer the user. Do not calculate totals. Do not invent facts.',
   'Use only tool names and argument shapes from the provided tool schema.',
   'Return clarification mode only when the question has multiple plausible meanings.',
   'Return unsupported mode only when the request is outside quick actions, conversations, order updates, or spend.',
   'For priority counts or lists, use listQuickActions with status suggested, priority, and responseFormat count or list.',
   'For money questions, use calculateMerchantSpend or calculateRefundTotals.',
+  'For order status, delivery, shipping, tracking, pickup, replacement, or refund-detail questions, use searchOrderUpdates or getOrderDetails, not calculateMerchantSpend.',
   'For category spend questions, pass a concise category string in calculateMerchantSpend or calculateRefundTotals, such as clothing, groceries, beauty, pets, restaurant, electronics, household, or gifts.',
   'For person response questions, use trackResponseFromPerson.',
   'Return JSON matching the required schema.',
@@ -47,8 +52,10 @@ export default async function handler(request, response) {
             content: [
               {
                 text: JSON.stringify({
+                  chatHistory: body.chatHistory ?? [],
                   dateRange: body.dateRange ?? null,
                   question: body.question,
+                  temporalContext: body.temporalContext ?? null,
                   tools: body.tools,
                 }),
                 type: 'input_text',
@@ -72,6 +79,7 @@ export default async function handler(request, response) {
                   enum: ['tool_calls', 'clarification', 'unsupported'],
                   type: 'string',
                 },
+                standaloneQuestion: { type: ['string', 'null'] },
                 toolCalls: {
                   items: {
                     additionalProperties: false,
@@ -126,6 +134,7 @@ export default async function handler(request, response) {
                 'clarificationQuestion',
                 'fallbackReason',
                 'mode',
+                'standaloneQuestion',
                 'toolCalls',
               ],
               type: 'object',
@@ -174,9 +183,13 @@ function isValidPlanRequest(body) {
     body &&
     typeof body.question === 'string' &&
     Array.isArray(body.tools) &&
+    (!body.chatHistory || Array.isArray(body.chatHistory)) &&
     (!body.dateRange ||
       (typeof body.dateRange.startDate === 'string' &&
-        typeof body.dateRange.endDate === 'string'))
+        typeof body.dateRange.endDate === 'string')) &&
+    (!body.temporalContext ||
+      typeof body.temporalContext.anchorDate === 'string' ||
+      body.temporalContext.anchorDate === null)
   )
 }
 

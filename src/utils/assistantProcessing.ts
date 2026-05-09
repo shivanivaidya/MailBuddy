@@ -41,6 +41,14 @@ export type AssistantRecentTurn = {
   type: AssistantAnswer['type']
 }
 
+export type AssistantChatHistoryTurn = {
+  answer: string
+  domain?: AssistantDomain
+  entities: AssistantRecentTurn['entities']
+  question: string
+  type: AssistantAnswer['type']
+}
+
 export type AssistantContext = {
   actions: ActionItem[]
   dateRange?: AssistantDateRange
@@ -76,6 +84,18 @@ export type AssistantMemory = {
 export type AssistantTurnResult = {
   answer: AssistantAnswer
   memory: AssistantMemory
+}
+
+export function getAssistantChatHistory(
+  memory: AssistantMemory,
+): AssistantChatHistoryTurn[] {
+  return (memory.recentTurns ?? []).map((turn) => ({
+    answer: turn.answer,
+    domain: turn.domain,
+    entities: turn.entities,
+    question: turn.query,
+    type: turn.type,
+  }))
 }
 
 type QueryUnderstanding = {
@@ -390,6 +410,31 @@ function answerQuickActionQuestion(
 ): AssistantTurnResult | undefined {
   const priority = getPriorityMention(query)
 
+  if (isTodayTaskSummaryQuery(query)) {
+    const actions = sortActionsByPriority(
+      listQuickActionsByStatus('suggested', context.dateRange, context),
+    )
+    const highestPriority = actions[0]?.priority
+    const highestPriorityActions = highestPriority
+      ? actions.filter((action) => action.priority === highestPriority)
+      : []
+
+    return {
+      answer: {
+        grounding: highestPriority
+          ? `Quick actions: ${highestPriority} priority`
+          : 'Quick actions',
+        message: highestPriorityActions.length
+          ? `${capitalize(highestPriority)} priority: ${highestPriorityActions
+              .map((action) => action.title)
+              .join(', ')}.`
+          : noDataAnswer.message,
+        type: highestPriorityActions.length ? 'answer' : 'no-data',
+      },
+      memory: remember(memory, 'quick_actions'),
+    }
+  }
+
   if (query.includes('completed')) {
     const count = listQuickActionsByStatus('completed', context.dateRange, context).length
 
@@ -517,6 +562,19 @@ function answerQuickActionQuestion(
   }
 
   return undefined
+}
+
+const priorityRank: Record<ActionItem['priority'], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+}
+
+function sortActionsByPriority(actions: ActionItem[]) {
+  return [...actions].sort(
+    (firstAction, secondAction) =>
+      priorityRank[firstAction.priority] - priorityRank[secondAction.priority],
+  )
 }
 
 function answerConversationQuestion(
@@ -2101,7 +2159,7 @@ function getSpendDateRange(
   query: string,
   context: AssistantContext,
 ): AssistantDateRange | undefined {
-  const anchorDate = context.dateRange?.endDate ?? getLatestOrderDate(context.orders)
+  const anchorDate = getSpendAnchorDate(context)
 
   if (query.includes('this month')) {
     return getMonthDateRange(anchorDate)
@@ -2112,6 +2170,17 @@ function getSpendDateRange(
   }
 
   return context.dateRange
+}
+
+function getSpendAnchorDate(context: AssistantContext) {
+  const candidates = [
+    context.dateRange?.endDate,
+    getLatestOrderDate(context.orders),
+  ].filter((value): value is string => Boolean(value))
+
+  return candidates.sort((firstDate, secondDate) =>
+    secondDate.localeCompare(firstDate),
+  )[0]
 }
 
 function getMonthDateRange(value: string | undefined): AssistantDateRange | undefined {
@@ -2182,6 +2251,16 @@ function titleCase(value: string) {
     .filter(Boolean)
     .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
     .join(' ')
+}
+
+function capitalize(value: string) {
+  return `${value[0].toUpperCase()}${value.slice(1)}`
+}
+
+function isTodayTaskSummaryQuery(query: string) {
+  return /\b(today|to do|need to do|tasks?|quick actions?)\b/.test(query) &&
+    /\b(today|to do|need to do)\b/.test(query) &&
+    !/\b(order|spend|spent|refund|delivered|delivery|conversation|thread|reply|respond)\b/.test(query)
 }
 
 function singularize(term: string) {

@@ -18,6 +18,12 @@ import {
   generateMerchantSpendSummaries,
 } from '@/utils/updateProcessing'
 
+const priorityRank: Record<ActionItem['priority'], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+}
+
 function findSourceEmail(emails: Email[], action: ActionItem | null) {
   if (!action) {
     return undefined
@@ -71,11 +77,14 @@ export function useMailBuddyDemo() {
     [filteredEmails],
   )
   const filteredActions = useMemo(
-    () => actions.filter((action) => filteredEmailIds.has(action.emailId)),
+    () =>
+      sortByPriority(
+        actions.filter((action) => filteredEmailIds.has(action.emailId)),
+      ),
     [actions, filteredEmailIds],
   )
   const filteredThreads = useMemo(
-    () => filterThreadsByDateRange(threads, filteredEmailIds),
+    () => sortByPriority(filterThreadsByDateRange(threads, filteredEmailIds)),
     [filteredEmailIds, threads],
   )
   const allOrderUpdates = useMemo(() => extractOrderUpdates(emails), [emails])
@@ -193,7 +202,12 @@ export function useMailBuddyDemo() {
   }
 
   function editThread(threadId: string, updates: EmailThreadEdit): void {
+    const trimmedSubject = updates.subject.trim()
     const trimmedDueDate = updates.dueDate?.trim()
+
+    if (!trimmedSubject) {
+      return
+    }
 
     setThreads((currentThreads) =>
       currentThreads.map((thread) => {
@@ -206,6 +220,7 @@ export function useMailBuddyDemo() {
           dueDate: trimmedDueDate || undefined,
           dueDateSource: getEditedThreadDueDateSource(thread, trimmedDueDate),
           priority: updates.priority,
+          subject: trimmedSubject,
         }
       }),
     )
@@ -352,6 +367,15 @@ function filterThreadsByDateRange(
 
 function toDateInputValue(value: string) {
   return value.slice(0, 10)
+}
+
+function sortByPriority<T extends { priority: ActionItem['priority'] }>(
+  items: T[],
+) {
+  return [...items].sort(
+    (firstItem, secondItem) =>
+      priorityRank[firstItem.priority] - priorityRank[secondItem.priority],
+  )
 }
 
 function getEditedDueDateSource(

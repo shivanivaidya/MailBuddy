@@ -3,13 +3,16 @@ import { AssistantPanel } from '@/components/AssistantPanel'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SourceEmailPreview } from '@/components/SourceEmailPreview'
 import { SuggestedTodoList } from '@/components/SuggestedTodoList'
-import { SummaryStrip } from '@/components/SummaryStrip'
 import { ThreadsSection } from '@/components/ThreadsSection'
-import { UpdatesSection } from '@/components/UpdatesSection'
+import {
+  UpdatesSection,
+  UpdatesSpendSection,
+} from '@/components/UpdatesSection'
 import { useMailBuddyDemo } from '@/hooks/useMailBuddyDemo'
 import type { AssistantAnswer } from '@/types/mail'
 import {
   answerAssistantTurn,
+  getAssistantChatHistory,
   type AssistantMemory,
 } from '@/utils/assistantProcessing'
 import {
@@ -77,7 +80,7 @@ export function Dashboard() {
     const assistantDateRange = getAssistantDateRange(query, emails)
     const assistantContext = {
       actions,
-      dateRange: assistantDateRange,
+      dateRange: assistantDateRange ?? dateRange,
       emails,
       merchantSpend: allMerchantSpend,
       orders: allOrderUpdates,
@@ -96,12 +99,14 @@ export function Dashboard() {
       return
     }
 
+    const chatHistory = getAssistantChatHistory(assistantMemory)
     setAssistantAnswer(null)
     setIsFinalizingAnswer(true)
     void answerAssistantWithToolPlanning(
       query,
       assistantContext,
       assistantMemory,
+      { chatHistory },
     )
       .then(async (plannedResult) => {
         if (assistantRequestId.current !== requestId) {
@@ -112,6 +117,10 @@ export function Dashboard() {
           query,
           plannedResult.answer,
           plannedResult.toolResults,
+          {
+            chatHistory,
+            standaloneQuestion: plannedResult.standaloneQuestion,
+          },
         )
 
         return {
@@ -132,59 +141,47 @@ export function Dashboard() {
       })
   }
 
+  function resetAssistantSession() {
+    assistantRequestId.current += 1
+    setAssistantAnswer(null)
+    setAssistantMemory({})
+    setIsFinalizingAnswer(false)
+    setIsListening(false)
+  }
+
   return (
     <div className="space-y-6">
-      <section className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-            AI action dashboard
-          </p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-            Suggested next steps from your inbox
-          </h2>
-          <p className="mt-3 text-base leading-7 text-slate-600">
-            Review fast inbox actions or switch into conversation context when
-            a thread needs more attention.
-          </p>
-        </div>
+      <section className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+        <DateRangeFilter
+          availableDateRange={availableDateRange}
+          dateRange={dateRange}
+          meta={dateFilterMeta}
+          onChange={updateDateRange}
+        />
 
-        <div className="flex flex-col gap-3 sm:flex-row lg:flex-col lg:items-stretch">
-          <div className="rounded-md border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Inbox scan
-            </p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">
-              {stats.emailsProcessed} sample emails processed
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center gap-5 lg:justify-end">
+          <p className="text-base font-semibold text-emerald-600">
+            {stats.emailsProcessed} emails processed
+          </p>
+          <AssistantPanel
+            answer={assistantAnswer}
+            isFinalizingAnswer={isFinalizingAnswer}
+            isListening={isListening}
+            onAsk={askAssistant}
+            onListeningChange={setIsListening}
+            onSessionReset={resetAssistantSession}
+          />
           <button
-            className="rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            className="rounded-xl bg-slate-950 px-8 py-4 text-base font-semibold text-white shadow-sm transition hover:bg-slate-800"
             onClick={resetDemo}
             type="button"
           >
-            Refresh Demo
+            Refresh
           </button>
         </div>
       </section>
 
-      <SummaryStrip stats={stats} />
-
-      <DateRangeFilter
-        availableDateRange={availableDateRange}
-        dateRange={dateRange}
-        meta={dateFilterMeta}
-        onChange={updateDateRange}
-      />
-
-      <AssistantPanel
-        answer={assistantAnswer}
-        isFinalizingAnswer={isFinalizingAnswer}
-        isListening={isListening}
-        onAsk={askAssistant}
-        onListeningChange={setIsListening}
-      />
-
-      <div className="inline-flex w-fit rounded-lg bg-white p-1 shadow-sm ring-1 ring-slate-200">
+      <div className="flex flex-wrap gap-3">
         <TabButton
           active={activeTab === 'tasks'}
           count={suggestedTaskCount}
@@ -205,49 +202,52 @@ export function Dashboard() {
         />
       </div>
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        {activeTab === 'tasks' ? (
-          <SuggestedTodoList
-            actions={filteredActions}
-            onDismiss={dismissAction}
-            onEdit={editAction}
-            onMarkDone={markActionDone}
-            onRestore={restoreAction}
-            onToggleSource={toggleSourceEmail}
-            selectedActionId={selectedActionId}
+      {activeTab === 'updates' ? (
+        <div className="space-y-6">
+          <UpdatesSpendSection merchantSpend={merchantSpend} />
+          <section className="grid gap-6 xl:grid-cols-2">
+            <UpdatesSection
+              onToggleOrder={toggleOrderUpdate}
+              orderUpdates={orderUpdates}
+              selectedOrderId={selectedOrderId}
+            />
+            <SourceEmailPreview
+              mode="updates"
+              order={selectedOrder}
+              orderEmails={selectedOrderEmails}
+            />
+          </section>
+        </div>
+      ) : (
+        <section className="grid gap-6 xl:grid-cols-2">
+          {activeTab === 'tasks' ? (
+            <SuggestedTodoList
+              actions={filteredActions}
+              onDismiss={dismissAction}
+              onEdit={editAction}
+              onMarkDone={markActionDone}
+              onRestore={restoreAction}
+              onToggleSource={toggleSourceEmail}
+              selectedActionId={selectedActionId}
+            />
+          ) : (
+            <ThreadsSection
+              onEditThread={editThread}
+              onMarkReviewed={markConversationReviewed}
+              onRestoreThread={restoreThread}
+              onToggleThread={toggleThread}
+              selectedThreadId={selectedThreadId}
+              threads={filteredThreads}
+            />
+          )}
+          <SourceEmailPreview
+            action={activeTab === 'tasks' ? selectedAction : null}
+            email={activeTab === 'tasks' ? selectedEmail : undefined}
+            mode={activeTab === 'threads' ? 'thread' : 'source'}
+            thread={activeTab === 'threads' ? selectedThread : null}
           />
-        ) : activeTab === 'threads' ? (
-          <ThreadsSection
-            onEditThread={editThread}
-            onMarkReviewed={markConversationReviewed}
-            onRestoreThread={restoreThread}
-            onToggleThread={toggleThread}
-            selectedThreadId={selectedThreadId}
-            threads={filteredThreads}
-          />
-        ) : (
-          <UpdatesSection
-            merchantSpend={merchantSpend}
-            onToggleOrder={toggleOrderUpdate}
-            orderUpdates={orderUpdates}
-            selectedOrderId={selectedOrderId}
-          />
-        )}
-        <SourceEmailPreview
-          action={activeTab === 'tasks' ? selectedAction : null}
-          email={activeTab === 'tasks' ? selectedEmail : undefined}
-          mode={
-            activeTab === 'threads'
-              ? 'thread'
-              : activeTab === 'updates'
-                ? 'updates'
-                : 'source'
-          }
-          order={activeTab === 'updates' ? selectedOrder : null}
-          orderEmails={activeTab === 'updates' ? selectedOrderEmails : []}
-          thread={activeTab === 'threads' ? selectedThread : null}
-        />
-      </section>
+        </section>
+      )}
     </div>
   )
 }
@@ -255,6 +255,10 @@ export function Dashboard() {
 function getAssistantDateRange(query: string, emails: Array<{ date: string }>) {
   const normalizedQuery = query.toLowerCase()
   const today = getAssistantAnchorDate(emails)
+
+  if (isTodayTaskSummaryQuery(normalizedQuery)) {
+    return undefined
+  }
 
   if (normalizedQuery.includes('this month')) {
     const year = today.getFullYear()
@@ -295,6 +299,12 @@ function getAssistantDateRange(query: string, emails: Array<{ date: string }>) {
   return undefined
 }
 
+function isTodayTaskSummaryQuery(query: string) {
+  return /\b(today|to do|need to do|tasks?|quick actions?)\b/.test(query) &&
+    /\b(today|to do|need to do)\b/.test(query) &&
+    !/\b(order|spend|spent|refund|delivered|delivery|conversation|thread|reply|respond)\b/.test(query)
+}
+
 function toDateValue(value: Date) {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, '0')
@@ -308,13 +318,8 @@ function getAssistantAnchorDate(emails: Array<{ date: string }>) {
     .map((email) => new Date(email.date))
     .filter((date) => !Number.isNaN(date.getTime()))
     .sort((firstDate, secondDate) => secondDate.getTime() - firstDate.getTime())[0]
-  const currentDate = new Date()
 
-  if (!latestEmailDate || currentDate.getTime() > latestEmailDate.getTime()) {
-    return currentDate
-  }
-
-  return latestEmailDate
+  return latestEmailDate ?? new Date()
 }
 
 function TabButton({
@@ -330,18 +335,18 @@ function TabButton({
 }) {
   return (
     <button
-      className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+      className={`rounded-xl px-6 py-4 text-base font-semibold shadow-sm transition ${
         active
-          ? 'bg-slate-950 text-white shadow-sm'
-          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+          ? 'bg-gradient-to-r from-pink-600 to-violet-600 text-white shadow-lg shadow-pink-900/15'
+          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950'
       }`}
       onClick={onClick}
       type="button"
     >
       {label}
       <span
-        className={`ml-2 rounded px-1.5 py-0.5 text-xs ${
-          active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'
+        className={`ml-2 text-sm ${
+          active ? 'text-white/80' : 'text-slate-500'
         }`}
       >
         {count}

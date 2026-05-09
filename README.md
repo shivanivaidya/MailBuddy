@@ -20,14 +20,17 @@ calculations. Deploy the serverless routes with:
 
 The browser never receives the OpenAI key.
 
-- `/api/assistant/plan` receives the user question, selected date range, and a
-  compact tool schema. It returns a validated tool-call plan.
+- `/api/assistant/plan` receives the user question, selected date range, current
+  session chat history, temporal context, and a compact tool schema. It rewrites
+  follow-up questions into standalone questions, then returns a validated
+  tool-call plan.
 - The frontend executes approved deterministic MailBuddy tools locally.
 - `/api/assistant/classify-spend` can classify compact order summaries into
   allowed spend categories such as `groceries`. The frontend validates returned
   order IDs/categories/confidence and still performs all totals locally.
-- `/api/assistant/finalize` receives only the original question and compact tool
-  results. It formats the final answer without doing retrieval or math.
+- `/api/assistant/finalize` receives the original question, standalone question,
+  current session chat history, and compact tool results. It formats the final
+  answer without doing retrieval or math.
 
 If either route or OpenAI call fails, MailBuddy keeps the deterministic template
 response.

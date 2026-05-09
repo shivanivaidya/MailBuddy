@@ -46,16 +46,16 @@ export function SourceEmailPreview({
         : 'Select a task to view its source email.'
 
     return (
-      <aside className="rounded-lg border border-dashed border-slate-200 bg-white/80 shadow-sm xl:sticky xl:top-6 xl:self-start">
-        <div className="border-b border-slate-200 px-5 py-4">
+      <aside className="min-h-[720px] rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+        <div className="px-6 py-6">
           <h3 className="text-base font-semibold text-slate-950">
             {heading}
           </h3>
-          <p className="mt-1 text-sm text-slate-500">{description}</p>
+          <p className="mt-5 text-base leading-7 text-slate-500">{description}</p>
         </div>
-        <div className="p-5">
-          <div className="rounded-lg bg-slate-50 px-5 py-10 text-center">
-            <p className="font-semibold text-slate-950">{emptyCopy}</p>
+        <div className="px-6 pb-10">
+          <div className="rounded-lg bg-slate-50 px-5 py-6 text-center">
+            <p className="text-base font-semibold text-slate-950">{emptyCopy}</p>
           </div>
         </div>
       </aside>
@@ -63,59 +63,62 @@ export function SourceEmailPreview({
   }
 
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white/90 shadow-sm xl:sticky xl:top-6 xl:self-start">
-      <div className="border-b border-slate-200 px-5 py-4">
+    <aside className="min-h-[720px] rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+      <div className="px-6 py-6">
         <h3 className="text-base font-semibold text-slate-950">
           Source email preview
         </h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Trace this suggested task back to the original email.
+        <p className="mt-5 text-base leading-7 text-slate-500">
+          Every suggested task can be traced back to the email that produced it.
         </p>
       </div>
 
-      <div className="space-y-5 p-5">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="space-y-7 px-6 pb-10">
+        <div className="border-b border-slate-200 pb-7">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-slate-500">Sender</p>
-              <p className="mt-1 font-semibold text-slate-950">
-                {email.sender}
+              <p className="text-base font-medium text-slate-500">Sender</p>
+              <p className="mt-3 text-base font-semibold text-slate-950">
+                {formatSenderName(email.sender)}
+              </p>
+              <p className="text-base text-slate-500">
+                {formatSenderAddress(email.sender)}
               </p>
             </div>
-            <span className="rounded-md bg-cyan-50 px-2.5 py-1 text-xs font-semibold capitalize text-cyan-700">
-              {action.priority}
+            <span className="text-base font-semibold capitalize text-pink-600">
+              {action.priority} <span aria-hidden="true">›</span>
             </span>
           </div>
 
-          <div className="mt-4">
-            <p className="text-sm font-medium text-slate-500">Subject</p>
-            <p className="mt-1 font-semibold text-slate-950">
+          <div className="mt-5">
+            <p className="text-base font-medium text-slate-500">Subject</p>
+            <p className="mt-3 text-base font-medium text-slate-950">
               {email.subject}
             </p>
           </div>
 
-          <div className="mt-4">
-            <p className="text-sm font-medium text-slate-500">Date</p>
-            <p className="mt-1 text-sm font-semibold text-slate-950">
+          <div className="mt-5">
+            <p className="text-base font-medium text-slate-500">Date</p>
+            <p className="mt-3 text-base font-medium text-slate-950">
               {formatEmailDate(email.date)}
             </p>
           </div>
         </div>
 
-        <div className="rounded-md border border-cyan-200 bg-cyan-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">
+        <div className="rounded-xl border border-pink-200 bg-pink-50 p-6">
+          <p className="text-base font-semibold uppercase tracking-wide text-pink-600">
             Source snippet that triggered this task
           </p>
-          <p className="mt-2 text-sm leading-6 text-cyan-950">
+          <p className="mt-4 text-base leading-7 text-slate-700">
             {action.sourceSnippet}
           </p>
         </div>
 
-        <div className="rounded-md border border-slate-200 bg-white p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div>
+          <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
             Full email body
           </p>
-          <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">
+          <p className="mt-4 whitespace-pre-line text-base leading-7 text-slate-700">
             {email.body}
           </p>
         </div>
@@ -132,31 +135,33 @@ function OrderPreview({
   relatedEmails: Email[]
 }) {
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white/90 shadow-sm xl:sticky xl:top-6 xl:self-start">
-      <div className="border-b border-slate-200 px-5 py-4">
+    <aside className="min-h-[720px] rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+      <div className="px-6 py-6">
         <h3 className="text-base font-semibold text-slate-950">
           Order details
         </h3>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-5 text-base leading-7 text-slate-500">
           Structured order data grouped from related source emails.
         </p>
       </div>
 
-      <div className="space-y-5 p-5">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="space-y-7 px-6 pb-10">
+        <div className="rounded-xl border border-pink-200 bg-pink-50 p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-slate-500">Merchant</p>
-              <p className="mt-1 font-semibold text-slate-950">
+              <p className="text-base font-semibold uppercase tracking-wide text-pink-600">
+                Merchant
+              </p>
+              <p className="mt-3 text-lg font-semibold text-slate-950">
                 {order.merchantName}
               </p>
             </div>
-            <span className="rounded-md bg-slate-950 px-2.5 py-1 text-xs font-semibold capitalize text-white">
+            <span className="rounded-md bg-pink-600 px-3 py-1.5 text-sm font-semibold capitalize text-white">
               {formatStatus(order.status)}
             </span>
           </div>
 
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <div className="mt-5 grid gap-4 text-base sm:grid-cols-2">
             <Detail label="Order number" value={`#${order.orderNumber}`} />
             <Detail label="Order date" value={formatEmailDate(order.orderDate)} />
             <Detail
@@ -249,25 +254,25 @@ function OrderPreview({
         </Section>
 
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
             Source emails
           </p>
           {relatedEmails.map((relatedEmail) => (
             <article
-              className="rounded-md border border-slate-200 bg-white p-4"
+              className="rounded-xl border border-pink-200 bg-pink-50/60 p-5"
               key={relatedEmail.id}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-950">
+                  <p className="text-base font-semibold text-slate-950">
                     {relatedEmail.subject}
                   </p>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-base text-slate-500">
                     {relatedEmail.sender} · {formatEmailDate(relatedEmail.date)}
                   </p>
                 </div>
               </div>
-              <p className="mt-3 text-sm leading-6 text-slate-700">
+              <p className="mt-4 text-base leading-7 text-slate-700">
                 {createEmailReferenceSnippet(relatedEmail.body)}
               </p>
             </article>
@@ -286,18 +291,18 @@ function Section({
   title: string
 }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <div className="rounded-xl border border-pink-200 bg-pink-50/60 p-5">
+      <p className="text-sm font-semibold uppercase tracking-wide text-pink-600">
         {title}
       </p>
-      <div className="mt-2">{children}</div>
+      <div className="mt-3">{children}</div>
     </div>
   )
 }
 
 function LineItem({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+    <div className="flex items-center justify-between gap-4 py-2.5 text-base">
       <span className="text-slate-700">{label}</span>
       {value ? (
         <span className="shrink-0 font-semibold text-slate-950">{value}</span>
@@ -313,10 +318,19 @@ function Detail({ label, value }: { label: string; value?: string }) {
 
   return (
     <div>
-      <p className="font-medium text-slate-500">{label}</p>
+      <p className="font-medium text-slate-600">{label}</p>
       <p className="mt-1 font-semibold text-slate-950">{value}</p>
     </div>
   )
+}
+
+function formatSenderName(sender: string) {
+  return sender.replace(/\s*<[^>]+>\s*$/, '').trim()
+}
+
+function formatSenderAddress(sender: string) {
+  const address = sender.match(/<(.+)>/)?.[1]
+  return address ? `<${address}>` : ''
 }
 
 function createEmailReferenceSnippet(body: string) {
@@ -333,78 +347,100 @@ function createEmailReferenceSnippet(body: string) {
 
 function ThreadPreview({ thread }: { thread: EmailThread }) {
   return (
-    <aside className="rounded-lg border border-slate-200 bg-white/90 shadow-sm xl:sticky xl:top-6 xl:self-start">
-      <div className="border-b border-slate-200 px-5 py-4">
+    <aside className="min-h-[720px] rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6 xl:self-start">
+      <div className="px-6 py-6">
         <h3 className="text-base font-semibold text-slate-950">
           Conversation context
         </h3>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-5 text-base leading-7 text-slate-500">
           Summarized context from related emails.
         </p>
       </div>
 
-      <div className="space-y-5 p-5">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="space-y-7 px-6 pb-10">
+        <div className="border-b border-slate-200 pb-7">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-slate-500">
+              <p className="text-base font-medium text-slate-500">
                 Conversation
               </p>
-              <p className="mt-1 font-semibold text-slate-950">
+              <p className="mt-3 text-base font-semibold text-slate-950">
                 {thread.subject}
               </p>
             </div>
             {thread.needsReply ? (
-              <span className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              <span className="text-base font-semibold text-pink-600">
                 Needs reply
               </span>
             ) : null}
           </div>
+
+          <div className="mt-5">
+            <p className="text-base font-medium text-slate-500">
+              Participants
+            </p>
+            <p className="mt-3 text-base font-medium text-slate-950">
+              {thread.participants.join(', ')}
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <p className="text-base font-medium text-slate-500">
+              Latest message
+            </p>
+            <p className="mt-3 text-base font-medium text-slate-950">
+              {formatSenderName(thread.latestEmail.sender)} ·{' '}
+              {formatEmailDate(thread.latestEmail.date)}
+            </p>
+          </div>
         </div>
 
-        <div className="rounded-md border border-cyan-200 bg-cyan-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">
+        <div className="rounded-xl border border-pink-200 bg-pink-50 p-6">
+          <p className="text-base font-semibold uppercase tracking-wide text-pink-600">
             MailBuddy summary
           </p>
-          <ul className="mt-3 space-y-2 text-sm leading-6 text-cyan-950">
+          <ul className="mt-4 space-y-3 text-base leading-7 text-slate-700">
             {thread.detailedSummaryBullets.map((bullet) => (
               <li className="flex gap-2" key={bullet}>
-                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-cyan-500" />
+                <span className="mt-3 size-1.5 shrink-0 rounded-full bg-pink-500" />
                 <span>{bullet}</span>
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
+            Full conversation
+          </p>
           {thread.emails.map((threadEmail) => {
             const isLatest = threadEmail.id === thread.latestEmail.id
 
             return (
               <article
-                className={`rounded-md border p-4 ${
+                className={`rounded-xl border p-5 ${
                   isLatest
-                    ? 'border-cyan-200 bg-cyan-50/60'
+                    ? 'border-pink-200 bg-pink-50/60'
                     : 'border-slate-200 bg-white'
                 }`}
                 key={threadEmail.id}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-950">
-                      {threadEmail.sender}
+                    <p className="text-base font-semibold text-slate-950">
+                      {formatSenderName(threadEmail.sender)}
                     </p>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-base text-slate-500">
                       {formatEmailDate(threadEmail.date)}
                     </p>
                   </div>
                   {isLatest ? (
-                    <span className="rounded-md bg-cyan-100 px-2 py-1 text-xs font-semibold text-cyan-700">
+                    <span className="text-base font-semibold text-pink-600">
                       Latest
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-3 text-sm leading-6 text-slate-700">
+                <p className="mt-4 whitespace-pre-line text-base leading-7 text-slate-700">
                   {threadEmail.body}
                 </p>
               </article>

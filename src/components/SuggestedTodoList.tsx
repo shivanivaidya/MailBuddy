@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ActionItem, ActionItemEdit } from '@/types/mail'
 
 type SuggestedTodoListProps = {
@@ -22,6 +22,12 @@ const archiveCopy: Record<ActionItem['status'], string> = {
   completed: 'No completed tasks yet.',
   dismissed: 'No dismissed tasks yet.',
 }
+
+const editControlClass =
+  'h-11 w-full min-w-0 rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
+
+const detailLabelClass =
+  'font-medium text-slate-600 underline decoration-slate-300 decoration-1 underline-offset-4'
 
 type TaskCardProps = {
   action: ActionItem
@@ -103,24 +109,24 @@ export function SuggestedTodoList({
   }
 
   return (
-    <section className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
-      <div className="flex flex-col gap-4 bg-slate-950 px-5 py-5 text-white sm:flex-row sm:items-center sm:justify-between">
+    <section className="overflow-hidden rounded-2xl bg-slate-950 p-6 shadow-sm">
+      <div className="flex flex-col gap-4 text-white sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-xl font-semibold">Quick actions</h3>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
+          <h3 className="text-2xl font-semibold">Quick actions</h3>
+          <p className="mt-6 max-w-3xl text-base leading-7 text-slate-300">
             Suggested by MailBuddy from your sample emails. Review before
             acting.
           </p>
         </div>
-        <span className="rounded-md bg-cyan-400 px-3 py-1.5 text-sm font-semibold text-slate-950">
+        <span className="rounded-md bg-gradient-to-r from-pink-500 to-violet-500 px-5 py-3 text-base font-semibold text-white">
           {actionGroups.suggested.length} active suggestions
         </span>
       </div>
 
-      <div className="space-y-5 bg-white p-4 sm:p-5">
+      <div className="mt-4 space-y-5">
         {selectedSuggestedIds.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-lg bg-slate-50 px-4 py-3 ring-1 ring-slate-200 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-medium text-slate-600">
+          <div className="flex flex-col gap-3 rounded-lg bg-white/10 px-4 py-3 ring-1 ring-white/10 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-slate-200">
               {selectedSuggestedIds.length} selected
             </p>
             <div className="flex gap-2">
@@ -172,12 +178,16 @@ export function SuggestedTodoList({
           actions={actionGroups.completed}
           label="Completed"
           onRestore={onRestore}
+          onToggleSource={onToggleSource}
+          selectedActionId={selectedActionId}
           status="completed"
         />
         <ArchiveSection
           actions={actionGroups.dismissed}
           label="Dismissed"
           onRestore={onRestore}
+          onToggleSource={onToggleSource}
+          selectedActionId={selectedActionId}
           status="dismissed"
         />
       </div>
@@ -199,12 +209,33 @@ function ActionItemCard({
   selectedForBulk = false,
 }: TaskCardProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [showEmailMeta, setShowEmailMeta] = useState(false)
   const [draftDueDate, setDraftDueDate] = useState('')
   const [draftPriority, setDraftPriority] = useState<ActionItem['priority']>(
     action.priority,
   )
   const [draftTitle, setDraftTitle] = useState('')
+  const editFormRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isEditing) {
+      return undefined
+    }
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (!editFormRef.current?.contains(event.target as Node)) {
+        setDraftTitle(action.title)
+        setDraftPriority(action.priority)
+        setDraftDueDate(action.dueDate ?? '')
+        setIsEditing(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick)
+    }
+  }, [action.dueDate, action.priority, action.title, isEditing])
 
   function saveEdit() {
     const nextTitle = draftTitle.trim()
@@ -223,17 +254,20 @@ function ActionItemCard({
 
   return (
     <article
-      className={`rounded-lg bg-white px-4 py-5 shadow-sm ring-1 transition sm:px-5 ${
+      className={`rounded-2xl bg-white px-7 py-6 shadow-sm ring-1 transition ${
         readonly
           ? action.status === 'completed'
             ? 'bg-emerald-50/35 ring-emerald-100'
             : 'bg-slate-50/70 opacity-70 ring-slate-100'
           : selected
-            ? 'ring-4 ring-cyan-100'
+            ? 'ring-4 ring-pink-400'
             : 'ring-slate-100 hover:ring-slate-200'
       }`}
       onClick={() => {
-        setShowEmailMeta((isVisible) => !isVisible)
+        if (isEditing) {
+          return
+        }
+
         onToggleSource?.(action.id)
       }}
     >
@@ -242,63 +276,81 @@ function ActionItemCard({
           isEditing ? '' : 'md:flex-row md:items-center md:justify-between'
         }`}
       >
-        <div className="flex min-w-0 flex-1 gap-4 md:items-center">
+        <div className="flex min-w-0 flex-1 gap-4">
           {!readonly ? (
             <input
               aria-label={`Select ${action.title}`}
               checked={selectedForBulk}
-              className="mt-1 size-4 shrink-0 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 md:mt-0"
+              className="mt-1 size-6 shrink-0 rounded border-slate-300 text-pink-600 focus:ring-pink-500"
               onChange={() => onToggleSelected?.(action.id)}
               onClick={(event) => event.stopPropagation()}
               type="checkbox"
             />
           ) : null}
           {typeof index === 'number' ? (
-            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-semibold text-slate-500 md:mt-0">
+            <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center text-lg font-medium text-slate-500">
               {index + 1}
             </div>
           ) : null}
           <div className="min-w-0 flex-1">
             {isEditing ? (
               <div
-                className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_150px_170px_auto]"
+                className="w-full max-w-full"
                 onClick={(event) => event.stopPropagation()}
+                ref={editFormRef}
               >
-                <input
-                  autoFocus
-                  className="min-w-0 rounded-md border border-cyan-300 px-3 py-2 text-base font-semibold text-slate-950 outline-none ring-cyan-100 focus:ring-4"
-                  onChange={(event) => setDraftTitle(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      saveEdit()
-                    }
+                <div className="grid w-full max-w-full items-end gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(110px,0.7fr)_minmax(110px,0.7fr)]">
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Title
+                    </span>
+                    <input
+                      autoFocus
+                      className={`${editControlClass} border-cyan-300 text-base text-slate-950 ring-cyan-100`}
+                      onChange={(event) => setDraftTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          saveEdit()
+                        }
 
-                    if (event.key === 'Escape') {
-                      setDraftTitle(action.title)
-                      setIsEditing(false)
-                    }
-                  }}
-                  value={draftTitle}
-                />
-                <select
-                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold capitalize text-slate-700 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  onChange={(event) =>
-                    setDraftPriority(event.target.value as ActionItem['priority'])
-                  }
-                  value={draftPriority}
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-                <input
-                  className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  onChange={(event) => setDraftDueDate(event.target.value)}
-                  placeholder="Due date"
-                  value={draftDueDate}
-                />
+                        if (event.key === 'Escape') {
+                          setDraftTitle(action.title)
+                          setIsEditing(false)
+                        }
+                      }}
+                      value={draftTitle}
+                    />
+                  </label>
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Priority
+                    </span>
+                    <select
+                      className={`${editControlClass} bg-white capitalize`}
+                      onChange={(event) =>
+                        setDraftPriority(event.target.value as ActionItem['priority'])
+                      }
+                      value={draftPriority}
+                    >
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Due date
+                  </span>
+                  <input
+                    className={editControlClass}
+                    onChange={(event) => setDraftDueDate(event.target.value)}
+                    placeholder="Due date"
+                      value={draftDueDate}
+                    />
+                  </label>
+                </div>
                 <button
-                  className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                  className="mt-3 h-11 w-full rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800 sm:w-auto"
                   onClick={(event) => {
                     event.stopPropagation()
                     saveEdit()
@@ -309,8 +361,41 @@ function ActionItemCard({
                 </button>
               </div>
             ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <span
+                  className={`rounded-md border px-3 py-1 text-lg font-semibold capitalize ${priorityStyles[action.priority]}`}
+                >
+                  {action.priority}
+                </span>
+                {action.dueDate ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-md bg-slate-950 px-4 py-2 text-lg font-semibold text-white"
+                    title={
+                      action.dueDateSource === 'user'
+                        ? 'Due date set by user'
+                        : 'Due date generated from email'
+                    }
+                  >
+                    Due {action.dueDate}
+                  </span>
+                ) : null}
+                {readonly ? (
+                  <span
+                    className={`rounded-md border px-3 py-1 text-lg font-semibold capitalize ${
+                      action.status === 'completed'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-slate-200 bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {action.status}
+                  </span>
+                ) : null}
+              </div>
+            )}
+
+            {!isEditing ? (
               <h4
-                className={`text-lg font-semibold leading-snug sm:text-xl ${
+                className={`mt-4 text-base font-semibold leading-snug ${
                   action.status === 'completed'
                     ? 'text-slate-700 line-through decoration-emerald-500 decoration-2'
                     : action.status === 'dismissed'
@@ -320,57 +405,28 @@ function ActionItemCard({
               >
                 {action.title}
               </h4>
-            )}
+            ) : null}
 
             <div className="mt-3 flex flex-wrap gap-2">
-              <span
-                className={`rounded-md border px-2.5 py-1 text-xs font-semibold capitalize ${priorityStyles[action.priority]}`}
-              >
-                {action.priority}
-              </span>
-              {action.dueDate ? (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white"
-                  title={
-                    action.dueDateSource === 'user'
-                      ? 'Due date set by user'
-                      : 'Due date generated from email'
-                  }
-                >
-                  {action.dueDateSource === 'user' ? (
-                    <UserDateIcon />
-                  ) : (
-                    <GeneratedDateIcon />
-                  )}
-                  Due {action.dueDate}
-                </span>
-              ) : null}
-              {readonly ? (
-                <span
-                  className={`rounded-md border px-2.5 py-1 text-xs font-semibold capitalize ${
-                    action.status === 'completed'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-200 bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  {action.status}
-                </span>
-              ) : null}
               {action.reason === 'No response received yet.' ? (
-                <span className="rounded-md border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700">
+                <span className="text-sm font-medium text-blue-600">
                   {action.reason}
                 </span>
               ) : null}
             </div>
 
-            {showEmailMeta && !isEditing ? (
-              <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600 ring-1 ring-slate-100">
+            {!isEditing ? (
+              <div className="mt-2 text-base leading-7 text-slate-500">
                 <p>
-                  <span className="font-medium text-slate-500">From:</span>{' '}
+                  <span className={selected ? detailLabelClass : undefined}>
+                    From:
+                  </span>{' '}
                   {formatSenderName(action.sourceSender)}
                 </p>
-                <p className="mt-1">
-                  <span className="font-medium text-slate-500">Subject:</span>{' '}
+                <p>
+                  <span className={selected ? detailLabelClass : undefined}>
+                    Subject:
+                  </span>{' '}
                   {action.sourceSubject}
                 </p>
               </div>
@@ -379,7 +435,7 @@ function ActionItemCard({
         </div>
 
         {!readonly && !isEditing ? (
-          <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
+          <div className="flex shrink-0 flex-wrap gap-5 md:justify-end">
             <IconButton
               label="Mark done"
               onClick={(event) => {
@@ -414,7 +470,9 @@ function ActionItemCard({
               <EditIcon />
             </IconButton>
           </div>
-        ) : (
+        ) : null}
+
+        {readonly ? (
           <button
             className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
             onClick={(event) => {
@@ -425,7 +483,7 @@ function ActionItemCard({
           >
             Move Back
           </button>
-        )}
+        ) : null}
       </div>
     </article>
   )
@@ -447,15 +505,15 @@ function IconButton({
   tone: 'dismiss' | 'done' | 'neutral'
 }) {
   const toneClass = {
-    dismiss: 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100',
-    done: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-    neutral: 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+    dismiss: 'text-red-500 hover:bg-red-50',
+    done: 'text-emerald-600 hover:bg-emerald-50',
+    neutral: 'text-slate-600 hover:bg-slate-50',
   }[tone]
 
   return (
     <button
       aria-label={label}
-      className={`flex size-9 items-center justify-center rounded-md border transition ${toneClass}`}
+      className={`flex size-10 items-center justify-center rounded-md bg-white text-lg transition ${toneClass}`}
       onClick={onClick}
       title={label}
       type="button"
@@ -518,73 +576,40 @@ function EditIcon() {
   )
 }
 
-function GeneratedDateIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="size-3"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M8 2v4" />
-      <path d="M16 2v4" />
-      <rect height="18" rx="2" width="18" x="3" y="4" />
-      <path d="M3 10h18" />
-      <path d="m9 16 2 2 4-4" />
-    </svg>
-  )
-}
-
-function UserDateIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="size-3"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  )
-}
-
 function ArchiveSection({
   actions,
   label,
   onRestore,
+  onToggleSource,
+  selectedActionId,
   status,
 }: {
   actions: ActionItem[]
   label: string
   onRestore: (actionId: string) => void
+  onToggleSource: (actionId: string) => void
+  selectedActionId: string | null
   status: Extract<ActionItem['status'], 'completed' | 'dismissed'>
 }) {
   return (
-    <details className="rounded-lg border border-slate-200 bg-slate-50">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+    <details className="rounded-lg border-t border-white/20 bg-transparent">
+      <summary className="cursor-pointer px-4 py-3 text-base font-semibold text-slate-300">
         {label} ({actions.length})
       </summary>
-      <div className="space-y-3 border-t border-slate-200 p-3">
+      <div className="space-y-3 border-t border-white/10 p-3">
         {actions.length > 0 ? (
           actions.map((action) => (
             <ActionItemCard
               action={action}
               key={action.id}
               onRestore={onRestore}
+              onToggleSource={onToggleSource}
               readonly
+              selected={selectedActionId === action.id}
             />
           ))
         ) : (
-          <p className="px-2 py-3 text-sm text-slate-500">
+          <p className="px-2 py-3 text-lg text-slate-400">
             {archiveCopy[status]}
           </p>
         )}

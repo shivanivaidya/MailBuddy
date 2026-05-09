@@ -56,6 +56,14 @@ describe('answerAssistantQuery', () => {
         'High priority: Pay upcoming bill, Submit registration before deadline.',
       type: 'answer',
     })
+    expect(
+      answerAssistantQuery('What do I need to do today?', context),
+    ).toMatchObject({
+      grounding: 'Quick actions: high priority',
+      message:
+        'High priority: Pay upcoming bill, Submit registration before deadline.',
+      type: 'answer',
+    })
 
     const mediumPriorityCount = context.actions.filter(
       (action) => action.priority === 'medium' && action.status === 'suggested',
@@ -305,6 +313,37 @@ describe('answerAssistantQuery', () => {
     expect(
       answerAssistantTurn('what about last month', context, currentMonthTurn.memory)
         .answer,
+    ).toMatchObject({
+      message:
+        'You spent $86.42 on Whole Foods Market in April. Included merchants: Whole Foods Market.',
+      type: 'answer',
+    })
+
+    const mayContext = {
+      ...context,
+      dateRange: {
+        endDate: '2026-05-31',
+        startDate: '2026-05-01',
+      },
+    }
+    const aprilContext = {
+      ...context,
+      dateRange: {
+        endDate: '2026-04-30',
+        startDate: '2026-04-01',
+      },
+    }
+    const mayWholeFoodsTurn = answerAssistantTurn(
+      'how much did I spend on Whole Foods this month',
+      mayContext,
+    )
+
+    expect(
+      answerAssistantTurn(
+        'what about last month',
+        aprilContext,
+        mayWholeFoodsTurn.memory,
+      ).answer,
     ).toMatchObject({
       message:
         'You spent $86.42 on Whole Foods Market in April. Included merchants: Whole Foods Market.',

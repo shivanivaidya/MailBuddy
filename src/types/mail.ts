@@ -49,7 +49,7 @@ export type EmailThread = {
   needsReply: boolean
 }
 
-export type EmailThreadEdit = Pick<EmailThread, 'priority'> & {
+export type EmailThreadEdit = Pick<EmailThread, 'priority' | 'subject'> & {
   dueDate?: string
 }
 
